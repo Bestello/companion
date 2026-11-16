@@ -38,7 +38,8 @@ struct ContentView: View {
                 Section("FMC account") {
                     if let user = account.user {
                         LabeledContent(user.name.isEmpty ? "Signed in" : user.name, value: user.email)
-                        Button("Sign out", role: .destructive) { account.signOut() }
+                        Button("Sign out") { account.signOut() }
+                        DeleteAccountButton()
                     } else {
                         NavigationLink("Sign in") { SignInView() }
                     }
@@ -119,7 +120,7 @@ struct SignInView: View {
             }
             Section {
                 Button {
-                    Task { await signIn() }
+                    run { try await account.signIn(email: email.trimmingCharacters(in: .whitespaces), password: password) }
                 } label: {
                     if busy { ProgressView() } else { Text("Sign in") }
                 }
@@ -127,18 +128,62 @@ struct SignInView: View {
             } footer: {
                 Link("No account? Sign up at fmc.tools", destination: Account.signUp)
             }
+            if !account.providers.isEmpty {
+                Section {
+                    // Apple first, as 4.8 wants it offered alongside, and in Apple's black style (HIG).
+                    ForEach(account.providers.sorted { $0.name == "apple" && $1.name != "apple" }) { p in
+                        Button {
+                            run { try await account.signIn(with: p) }
+                        } label: {
+                            Label("Continue with \(p.displayName)", systemImage: p.name == "apple" ? "apple.logo" : "person.crop.circle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .listRowBackground(p.name == "apple" ? Color.black : nil)
+                        .foregroundStyle(p.name == "apple" ? .white : .accentColor)
+                        .disabled(busy)
+                    }
+                }
+            }
         }
         .navigationTitle("Sign in")
+        .task { await account.loadProviders() }
     }
 
-    private func signIn() async {
-        busy = true
-        defer { busy = false }
-        do {
-            try await account.signIn(email: email.trimmingCharacters(in: .whitespaces), password: password)
-            dismiss()
-        } catch {
-            self.error = error.localizedDescription
+    private func run(_ action: @escaping () async throws -> Void) {
+        Task {
+            busy = true
+            defer { busy = false }
+            do {
+                try await action()
+                dismiss()
+            } catch is CancellationError {
+            } catch {
+                self.error = error.localizedDescription
+            }
         }
+    }
+}
+
+struct DeleteAccountButton: View {
+    @Environment(Account.self) private var account
+    @State private var asking = false
+    @State private var error: String?
+
+    var body: some View {
+        Button("Delete account", role: .destructive) { asking = true }
+            .confirmationDialog("Delete your FMC account?", isPresented: $asking, titleVisibility: .visible) {
+                Button("Delete account", role: .destructive) {
+                    Task {
+                        do { try await account.deleteAccount() } catch { self.error = error.localizedDescription }
+                    }
+                }
+            } message: {
+                Text("This removes your account and profile on fmc.tools. It can't be undone.")
+            }
+            .alert("Couldn't delete the account", isPresented: .constant(error != nil)) {
+                Button("OK") { error = nil }
+            } message: {
+                Text(error ?? "")
+            }
     }
 }
