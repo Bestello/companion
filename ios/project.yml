@@ -1,0 +1,41 @@
+# xcodegen generate: makes FMCCompanion.xcodeproj (committed, so xcodebuild works without xcodegen).
+name: FMCCompanion
+options:
+  bundleIdPrefix: tools.fmc
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  WireKit:
+    path: WireKit
+targets:
+  FMCCompanion:
+    type: application
+    platform: iOS
+    sources: [App]
+    dependencies:
+      - package: WireKit
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: FMC Companion
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSBluetoothAlwaysUsageDescription: FMC Companion connects to your watch to read which watch faces and apps are on it.
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: tools.fmc.companion
+        PRODUCT_NAME: FMC Companion
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+schemes:
+  FMCCompanion:
+    build:
+      targets:
+        FMCCompanion: all
+    test:
+      targets:
+        - package: WireKit/WireKitTests
