@@ -44,6 +44,17 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
+               BlueprintIdentifier = "8F7D721C9C947E0E364567BC"
+               BuildableName = "FMCCompanionTests.xctest"
+               BlueprintName = "FMCCompanionTests"
+               ReferencedContainer = "container:FMCCompanion.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
                BlueprintIdentifier = "WireKitTests"
                BuildableName = "WireKitTests"
                BlueprintName = "WireKitTests"
