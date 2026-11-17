@@ -37,7 +37,8 @@ final class FakeWatch: Requester, @unchecked Sendable {
     let s = try #require(try await readLoader(w))
     #expect(s.stub == Stub(version: 5, abiMinor: 3))
     #expect(s.loader?.kind == 1)
-    #expect(s.apps == [2: PackageHeader(kind: pkg.kind, name: pkg.name, version: pkg.version)])
+    #expect(s.apps == [2: parseHeader(Data(header))!])
+    #expect(s.apps[2]?.name == pkg.name)
 }
 
 @Test func garbledStubReplyThrows() async throws {

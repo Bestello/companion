@@ -35,9 +35,8 @@ class MainActivity : ComponentActivity() {
         // adb shell am start -n … --ez apps true [--es app <package>]
         if (intent.getBooleanExtra("apps", false)) {
             nav.root()
-            nav.tab = 1
+            nav.tab = 2
             nav.app = intent.getStringExtra("app")
-            nav.apps = nav.app == null
         }
         // Screenshots and manual checks: adb shell am start -n … --ei tab 1 --ez check true
         if (BuildConfig.DEBUG) {

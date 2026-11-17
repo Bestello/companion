@@ -12,7 +12,7 @@ XCB     = xcodebuild -project ios/FMCCompanion.xcodeproj -scheme FMCCompanion -c
 ios-sim:
 	$(XCB) -destination 'platform=iOS Simulator,name=$(SIM)' -derivedDataPath build/ios-sim build
 	xcrun simctl boot '$(SIM)' 2>/dev/null || true
-	open -a Simulator
+	open -a Simulator 2>/dev/null || open "$$(xcode-select -p)/../Applications/DeviceHub.app"
 	xcrun simctl install '$(SIM)' "build/ios-sim/Build/Products/Debug-iphonesimulator/FMC Companion.app"
 	xcrun simctl launch '$(SIM)' $(APP_ID)
 

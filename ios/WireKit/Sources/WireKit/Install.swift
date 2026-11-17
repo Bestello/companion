@@ -21,9 +21,11 @@ public struct PackageHeader: Equatable, Sendable {
     public var kind: Int
     public var name: String
     public var version: UInt32
+    /// CRC-32 of the image: tells two builds with the same version apart (the loader's version stays 1).
+    public var crc: UInt32
 
-    public init(kind: Int, name: String, version: UInt32) {
-        (self.kind, self.name, self.version) = (kind, name, version)
+    public init(kind: Int, name: String, version: UInt32, crc: UInt32 = 0) {
+        (self.kind, self.name, self.version, self.crc) = (kind, name, version, crc)
     }
 }
 
@@ -32,12 +34,13 @@ public enum InstallError: Error, Equatable {
     case refused(UInt8)
 }
 
-/// The package header (`package.HEADER`: magic "WP2A", abi, kind, abi_minor, name[24], version, …).
+/// The package header (`package.HEADER`: magic "WP2A", abi, kind, abi_minor, name[24], version, size, entry,
+/// relocations, crc, …).
 public func parseHeader(_ d: Data) -> PackageHeader? {
     guard d.count >= headerSize, d.prefix(4) == Data("WP2A".utf8) else { return nil }
     let name = d[d.startIndex + 8..<d.startIndex + 32].prefix { $0 != 0 }
     return PackageHeader(kind: Int(d[d.startIndex + 6]), name: String(decoding: name, as: UTF8.self),
-                         version: d.le(UInt32.self, at: 32))
+                         version: d.le(UInt32.self, at: 32), crc: d.le(UInt32.self, at: 48))
 }
 
 func check(_ r: Data) throws -> Data {

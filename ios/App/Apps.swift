@@ -26,6 +26,19 @@ struct WatchApp: Identifiable {
         let names = Set(installed.map(\.name))
         return installed + perms.packages.filter { !names.contains($0) }.map { WatchApp(name: $0, header: nil, slot: nil) }
     }
+
+    /// Every app in the FMC store, the ones on the watch with their version and slot.
+    @MainActor static func store(_ loader: LoaderState?) -> [WatchApp] {
+        let installed = (loader?.apps ?? [:]).map { (slot: $0.key, header: $0.value) }
+        let store = StoreApps.shared
+        return store.all.map { l in
+            if let on = installed.first(where: { store.listing($0.header.name)?.slug == l.slug }) {
+                WatchApp(name: on.header.name, header: on.header, slot: on.slot)
+            } else {
+                WatchApp(name: l.slug, header: nil, slot: nil)
+            }
+        }
+    }
 }
 
 /// The coloured rounded square of an iOS Settings row.
@@ -63,8 +76,10 @@ struct CountBadge: View {
 /// name. Loaded once per launch.
 @MainActor @Observable final class StoreApps {
     static let shared = StoreApps()
-    struct Listing { let name: String; let icon: URL? }
+    struct Listing { let slug, name: String; let icon: URL? }
     private(set) var byKey: [String: Listing] = [:]
+    /// By name, for the All segment.
+    private(set) var all: [Listing] = []
     private var loaded = false
 
     func listing(_ package: String) -> Listing? { byKey[package.lowercased()] }
@@ -83,10 +98,12 @@ struct CountBadge: View {
             // ponytail: SVG icons have no image decoder here, those apps keep the letter tile
             let icon = r.icon.isEmpty || r.icon.hasSuffix(".svg") ? nil
                 : Account.base.appending(path: "api/files/\(r.collectionId)/\(r.id)/\(r.icon)")
-            let l = Listing(name: r.name, icon: icon)
+            let l = Listing(slug: r.slug, name: r.name, icon: icon)
             byKey[r.slug.lowercased()] = l
             byKey[r.name.lowercased()] = l
+            all.append(l)
         }
+        all.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 }
 
@@ -118,39 +135,86 @@ struct AppIcon: View {
     }
 }
 
+/// The Apps tab: the list, and an app's page over it.
+struct AppsTab: View {
+    // DEBUG screenshots: `-app <name>` opens that app's page
+    @State private var path: [String] = {
+        let a = CommandLine.arguments
+        guard let i = a.firstIndex(of: "-app"), i + 1 < a.count else { return [] }
+        return [a[i + 1]]
+    }()
+
+    var body: some View {
+        @Bindable var perms = Permissions.shared
+        NavigationStack(path: $path) {
+            AppsView()
+                .navigationDestination(for: String.self) { AppView(name: $0) }
+        }
+        // the ask notification: that app's page
+        .onChange(of: perms.open, initial: true) { _, name in
+            guard let name else { return }
+            path = [name]
+            perms.open = nil
+        }
+    }
+}
+
 struct AppsView: View {
     @Environment(WatchModel.self) private var watch
     private var perms = Permissions.shared
+    @State private var showAll = false
 
     var body: some View {
-        let apps = WatchApp.all(watch.loader, perms)
+        let apps = showAll ? WatchApp.store(watch.loader) : WatchApp.all(watch.loader, perms)
         List {
-            let on = apps.filter { $0.slot != nil }, off = apps.filter { $0.slot == nil }
-            if !on.isEmpty {
-                Section("On the watch") { ForEach(on) { row($0) } }
-            }
-            if !off.isEmpty {
-                Section {
-                    ForEach(off) { row($0) }
-                } header: {
-                    Text(watch.loader == nil ? "Asked for permissions" : "Not on the watch")
-                } footer: {
-                    if watch.loader == nil { Text("Connect on the Watch tab to see every app on the watch.") }
+            Section {
+                Picker("Show", selection: $showAll) {
+                    Text("Installed").tag(false)
+                    Text("All").tag(true)
                 }
+                .pickerStyle(.segmented)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+            }
+            if showAll {
+                Section { ForEach(apps) { row($0) } } footer: { Text("Apps in the FMC store.") }
+            } else {
+                installed(apps)
             }
         }
         .overlay {
             if apps.isEmpty {
-                ContentUnavailableView("No apps", systemImage: "square.grid.2x2",
-                                       description: Text("Connect on the Watch tab to see the apps on the watch."))
+                if showAll {
+                    ContentUnavailableView("No apps", systemImage: "square.grid.2x2",
+                                           description: Text("Couldn't load the FMC store."))
+                } else {
+                    ContentUnavailableView("No apps", systemImage: "square.grid.2x2",
+                                           description: Text("Connect on the Watch tab to see the apps on the watch."))
+                }
             }
         }
         .navigationTitle("Apps")
         .task { await StoreApps.shared.load() }
     }
 
+    @ViewBuilder private func installed(_ apps: [WatchApp]) -> some View {
+        let on = apps.filter { $0.slot != nil }, off = apps.filter { $0.slot == nil }
+        if !on.isEmpty {
+            Section("On the watch") { ForEach(on) { row($0) } }
+        }
+        if !off.isEmpty {
+            Section {
+                ForEach(off) { row($0) }
+            } header: {
+                Text(watch.loader == nil ? "Asked for permissions" : "Not on the watch")
+            } footer: {
+                if watch.loader == nil { Text("Connect on the Watch tab to see every app on the watch.") }
+            }
+        }
+    }
+
     private func row(_ app: WatchApp) -> some View {
-        NavigationLink(value: ContentView.Route.app(app.name)) {
+        NavigationLink(value: app.name) {
             HStack(spacing: 12) {
                 AppIcon(name: app.name)
                 VStack(alignment: .leading, spacing: 1) {

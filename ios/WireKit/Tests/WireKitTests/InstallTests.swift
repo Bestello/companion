@@ -28,8 +28,11 @@ let pkg = v.package
 let header = hex(pkg.info_reply_hex).dropFirst()
 
 @Test func headerMatchesPython() {
-    #expect(parseHeader(Data(header)) == PackageHeader(kind: pkg.kind, name: pkg.name, version: pkg.version))
-    #expect(parseHeader(hex(pkg.hex)) == PackageHeader(kind: pkg.kind, name: pkg.name, version: pkg.version))
+    // the image CRC: crc32 of what follows the header, as package.pack writes it
+    let want = PackageHeader(kind: pkg.kind, name: pkg.name, version: pkg.version,
+                             crc: crc32(Data(hex(pkg.hex).dropFirst(64))))
+    #expect(parseHeader(Data(header)) == want)
+    #expect(parseHeader(hex(pkg.hex)) == want)
     #expect(parseHeader(Data(count: 64)) == nil)
 }
 

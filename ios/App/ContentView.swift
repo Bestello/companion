@@ -7,7 +7,9 @@ struct FMCCompanionApp: App {
     @State private var account = Account()
     @State private var watch = WatchModel()
     @State private var catalog = Catalog()
-    @State private var tab = CommandLine.arguments.contains("-watch") ? 1 : 0
+    // DEBUG screenshots: `-watch` opens the Watch tab, `-apps` Apps, `-app <name>` that app's page
+    @State private var tab = CommandLine.arguments.contains("-watch") ? 1
+        : CommandLine.arguments.contains(where: { $0 == "-apps" || $0 == "-app" }) ? 2 : 0
     /// The catalog's navigation: face ids. A link to a face replaces it.
     @State private var path: [String] = []
 
@@ -17,12 +19,16 @@ struct FMCCompanionApp: App {
                 CatalogView(path: $path)
                     .tabItem { Label("Watch faces", systemImage: "square.grid.2x2") }
                     .tag(0)
+                AppsTab()
+                    .tabItem { Label("Apps", systemImage: "square.grid.3x3.fill") }
+                    .badge(Permissions.shared.pending.count)
+                    .tag(2)
                 ContentView()
                     .tabItem { Label("Watch", systemImage: "applewatch") }
                     .tag(1)
             }
             .onOpenURL(perform: open)
-            .onChange(of: Permissions.shared.open) { if $1 != nil { tab = 1 } }
+            .onChange(of: Permissions.shared.open) { if $1 != nil { tab = 2 } }
             .environment(account)
             .environment(watch)
             .environment(catalog)
@@ -55,19 +61,12 @@ struct ContentView: View {
     /// One path for every page the Watch tab pushes: links by value only, mixed link styles push twice.
     @State private var path: [Route] = Self.launchPath
 
-    enum Route: Hashable { case apps, app(String), developer, wakeProbe, signIn }
+    enum Route: Hashable { case firmware, developer, wakeProbe, signIn }
 
-    // DEBUG screenshots: `-apps` opens Apps, `-app <name>` that app's page, `-signin` Sign in
-    private static var launchPath: [Route] {
-        let a = CommandLine.arguments
-        if let i = a.firstIndex(of: "-app"), i + 1 < a.count { return [.apps, .app(a[i + 1])] }
-        if a.contains("-apps") { return [.apps] }
-        if a.contains("-signin") { return [.signIn] }
-        return []
-    }
+    // DEBUG screenshots: `-signin` opens Sign in
+    private static var launchPath: [Route] { CommandLine.arguments.contains("-signin") ? [.signIn] : [] }
 
     var body: some View {
-        @Bindable var perms = Permissions.shared
         NavigationStack(path: $path) {
             List {
                 Section {
@@ -75,20 +74,15 @@ struct ContentView: View {
                 } footer: {
                     Text("Keep the watch connected in Nothing X. The app only reads from it.")
                 }
-                if let state = watch.loader {
-                    LoaderSection(state: state)
-                }
                 Section {
-                    NavigationLink(value: Route.apps) {
+                    NavigationLink(value: Route.firmware) {
                         HStack(spacing: 12) {
-                            SettingsIcon(symbol: "square.grid.2x2.fill", color: .indigo)
-                            Text("Apps")
+                            SettingsIcon(symbol: "cpu.fill", color: .gray)
+                            Text("Firmware")
                             Spacer()
-                            CountBadge(count: Permissions.shared.pending.count)
+                            CountBadge(count: FirmwareModel.shared.updates(watch.loader))
                         }
                     }
-                } footer: {
-                    Text("What each watch app may use on your phone.")
                 }
                 FacesOnWatchSection()
                 Section {
@@ -124,10 +118,11 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("FMC Companion")
+            // updates are checked right after each connect: the Firmware row shows them
+            .task(id: watch.phase) { if case .checked = watch.phase { await FirmwareModel.shared.refresh() } }
             .navigationDestination(for: Route.self) { route in
                 switch route {
-                case .apps: AppsView()
-                case .app(let name): AppView(name: name)
+                case .firmware: FirmwareView()
                 case .developer: DeveloperView()
                 case .wakeProbe:
                     #if DEBUG
@@ -137,12 +132,6 @@ struct ContentView: View {
                     #endif
                 case .signIn: SignInView()
                 }
-            }
-            // the ask notification: that app's page, over Apps
-            .onChange(of: perms.open) { _, name in
-                guard let name else { return }
-                path = [.apps, .app(name)]
-                perms.open = nil
             }
         }
     }
@@ -222,20 +211,23 @@ struct FacesOnWatchSection: View {
         Section {
             if !faces.isEmpty {
                 // as Nothing X and fmc.tools show them: the round previews in the watch's own order
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: 14)], spacing: 14) {
-                    ForEach(faces) { slot in
-                        let face = slot.face(in: catalog)
-                        VStack(spacing: 6) {
-                            if let url = face?.previewURL ?? slot.savedPreview {
-                                FacePreview(url: url)
-                            } else {
-                                // no picture anywhere for stock and Nothing X faces: the watch's place for it
-                                Circle().fill(.black).aspectRatio(1, contentMode: .fit).overlay {
-                                    Text("\(slot.index + 1)").font(.system(.title, design: .rounded, weight: .bold))
-                                        .foregroundStyle(Color.fmcAccent)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 12) {
+                        ForEach(faces) { slot in
+                            let face = slot.face(in: catalog)
+                            VStack(spacing: 6) {
+                                if let url = face?.previewURL ?? slot.savedPreview {
+                                    FacePreview(url: url)
+                                } else {
+                                    // no picture anywhere for stock and Nothing X faces: the watch's place for it
+                                    Circle().fill(.black).aspectRatio(1, contentMode: .fit).overlay {
+                                        Text("\(slot.index + 1)").font(.system(.title, design: .rounded, weight: .bold))
+                                            .foregroundStyle(Color.fmcAccent)
+                                    }
                                 }
+                                Text(face?.name ?? slot.label).font(.caption.weight(.semibold)).lineLimit(1)
                             }
-                            Text(face?.name ?? slot.label).font(.caption.weight(.semibold)).lineLimit(1)
+                            .frame(width: 84)
                         }
                     }
                 }
@@ -286,20 +278,6 @@ struct FacesOnWatchSection: View {
         date = UserDefaults.standard.object(forKey: "faces-on-watch-date") as? Date
         count = UserDefaults.standard.array(forKey: "faces-on-watch-count") as? [Int]
         header = UserDefaults.standard.string(forKey: "faces-on-watch-header") ?? ""
-    }
-}
-
-struct LoaderSection: View {
-    let state: LoaderState
-
-    var body: some View {
-        Section("App Loader") {
-            HStack {
-                Metric(value: "\(state.stub.version)", unit: "Stub")
-                Metric(value: state.loader.map { "\($0.version)" } ?? "—", unit: "Loader")
-            }
-            .padding(.vertical, 4)
-        }
     }
 }
 

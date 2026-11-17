@@ -1,6 +1,9 @@
 package tools.fmc.companion
 
 import android.Manifest
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import tools.fmc.companion.wire.UploadError
 import tools.fmc.companion.wire.dialId
 import androidx.compose.ui.unit.sp
@@ -45,6 +48,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -97,23 +101,21 @@ class Nav {
     var tab by mutableStateOf(0)
     var face by mutableStateOf<String?>(null)
     var signingIn by mutableStateOf(false)
-    var apps by mutableStateOf(false)
     /** A watch app's page, over Apps or straight from its ask notification. */
     var app by mutableStateOf<String?>(null)
     var developer by mutableStateOf(false)
 
     /** Back to the tab's root. */
-    fun root() { face = null; signingIn = false; apps = false; app = null; developer = false }
+    fun root() { face = null; signingIn = false; app = null; developer = false }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun App(model: AppModel, nav: Nav) {
-    BackHandler(nav.face != null || nav.signingIn || nav.apps || nav.app != null || nav.developer) {
+    BackHandler(nav.face != null || nav.signingIn || nav.app != null || nav.developer) {
         when {
             nav.signingIn -> nav.signingIn = false
             nav.app != null -> nav.app = null
-            nav.apps -> nav.apps = false
             nav.developer -> nav.developer = false
             else -> nav.face = null
         }
@@ -124,6 +126,12 @@ fun App(model: AppModel, nav: Nav) {
             NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                 NavigationBarItem(nav.tab == 0, { nav.tab = 0; nav.root() },
                     icon = { Icon(Icons.Default.Home, null) }, label = { Text("Watch faces") })
+                val pending = liveGrants().pending().size
+                NavigationBarItem(nav.tab == 2, { nav.tab = 2; nav.root() }, label = { Text("Apps") }, icon = {
+                    BadgedBox({ if (pending > 0) androidx.compose.material3.Badge { Text("$pending") } }) {
+                        Icon(painterResource(R.drawable.ic_apps), null, Modifier.size(24.dp))
+                    }
+                })
                 NavigationBarItem(nav.tab == 1, { nav.tab = 1; nav.root() },
                     icon = { Icon(painterResource(R.drawable.ic_watch), null, Modifier.size(24.dp)) }, label = { Text("Watch") })
             }
@@ -133,10 +141,10 @@ fun App(model: AppModel, nav: Nav) {
             when {
                 nav.signingIn -> SignInScreen(model) { nav.signingIn = false }
                 nav.app != null -> AppScreen(model, nav.app!!) { nav.app = null }
-                nav.apps -> AppsScreen(model, { nav.app = it }) { nav.apps = false }
                 nav.developer -> DeveloperScreen { nav.developer = false }
                 nav.face != null -> FaceScreen(model, nav.face!!) { nav.face = null }
                 nav.tab == 0 -> CatalogScreen(model) { nav.face = it }
+                nav.tab == 2 -> AppsScreen(model) { nav.app = it }
                 else -> WatchScreen(model, nav) { nav.signingIn = true }
             }
         }
@@ -379,7 +387,6 @@ fun FaceScreen(model: AppModel, id: String, back: () -> Unit) {
 
 @Composable
 fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
-    val grants = liveGrants()
     val context = LocalContext.current
     val check = withBluetooth { model.check() }
     // the ASK notifications need POST_NOTIFICATIONS; the services run without it
@@ -403,13 +410,6 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
                             Metric("${state.stub.version}", "Stub", Modifier.weight(1f))
                             Metric(state.loader?.version?.toString() ?: "—", "Loader", Modifier.weight(1f))
                         }
-                    }
-                }
-            }
-            item {
-                Section(footer = "What each watch app may use on your phone.") {
-                    NavRow("Apps", count = grants.pending().size, onClick = { nav.apps = true }) {
-                        IconTile(painterResource(R.drawable.ic_apps), Color(0xFF3949AB))
                     }
                 }
             }
@@ -439,24 +439,21 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
                     val faces = on.faces
                     // as Nothing X and fmc.tools show them: the round previews in the watch's own order. An FMC face,
                     // from here or fmc.tools, is dialId(record id) and has its catalog preview.
-                    faces.chunked(3).forEach { row ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                            row.forEach { slot ->
-                                val face = (model.mine + model.all).firstOrNull { dialId(it.id) == slot.id }
-                                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    val url = face?.previewURL ?: slot.preview
-                                    if (url != null) FacePreview(url, Modifier.fillMaxWidth())
-                                    else Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(CircleShape).background(Color.Black),
-                                        contentAlignment = Alignment.Center) {
-                                        // no picture anywhere for stock and Nothing X faces: the watch's place for it
-                                        Text("${slot.index + 1}", color = Color(0xFFFFC700), fontSize = 26.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                    Text(face?.name ?: slot.label, style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (faces.isNotEmpty()) LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        items(faces, key = { it.index }) { slot ->
+                            val face = (model.mine + model.all).firstOrNull { dialId(it.id) == slot.id }
+                            Column(Modifier.width(96.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                val url = face?.previewURL ?: slot.preview
+                                if (url != null) FacePreview(url, Modifier.fillMaxWidth())
+                                else Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(CircleShape).background(Color.Black),
+                                    contentAlignment = Alignment.Center) {
+                                    // no picture anywhere for stock and Nothing X faces: the watch's place for it
+                                    Text("${slot.index + 1}", color = Color(0xFFFFC700), fontSize = 26.sp, fontWeight = FontWeight.Bold)
                                 }
+                                Text(face?.name ?: slot.label, style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
-                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                         }
                     }
                     if (reading) Text("Reading the watch…", color = Fmc.secondary)
@@ -466,7 +463,7 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
             }
             item {
                 Section("Settings", footer = "Watch apps ask for your calendar, location, weather, notifications or a website. " +
-                    "You answer each one on the app's page under Apps.") {
+                    "You answer each one on the Apps tab.") {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Services for watch apps", Modifier.weight(1f))
                         Switch(model.services, { on -> if (on) startServices() else model.switchServices(false) })

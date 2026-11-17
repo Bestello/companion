@@ -1,0 +1,73 @@
+# Watch apps on the phone
+
+The Apps tab on iOS and Android lists the apps on the watch, plus the ones that asked for something but are gone from
+the watch now. Each app's page has a switch for every service it asked for. The services themselves and their byte
+layouts are in [miniapp-rpc.md](miniapp-rpc.md). This file covers how the phone side works and why it looks the way it
+does.
+
+## Where the code is
+
+Android, under `android/app/src/main/java/tools/fmc/companion/`:
+
+| File | What it does |
+|---|---|
+| `wire/Rpc.kt` | The RPC itself: parses a watch app's request, encodes the reply and the error codes. Pure Kotlin except `answer`, which checks the grant and runs the service |
+| `RpcService.kt` | Foreground service that keeps the link and answers requests one at a time, in order |
+| `Services.kt` | The services: calendar, location, weather, notifications, http |
+| `Grants.kt` | What the user allowed per app, and the "app wants X" notification |
+| `Apps.kt` | The Apps tab, an app's page, store names and icons |
+| `wire/Session.kt`, `wire/Frame.kt` | Session, encryption and frames under the RPC |
+| `BleLink.kt` | GATT client on the link Nothing X already holds. Not tested on a real watch yet (FMC-9) |
+
+iOS has the same split: `ios/WireKit` for the wire format, `ios/App/RPCListener.swift`, `PhoneServices.swift`,
+`Permissions.swift` and `Apps.swift`.
+
+To build your own companion, take the transport (`Session`, `Frame`, `BleLink`) as it is. Then write your own `Rpc`
+and services, and check them against `ios/WireKit/Tests/WireKitTests/rpc-vectors.json`. New methods go into
+miniapp-rpc.md first.
+
+## One link, several sessions
+
+There's one BLE link, the one Nothing X holds, but more than one client can use it. Android shares the LE link between
+apps' GATT clients, so we connect next to Nothing X without a bind or a popup. We already run two sessions on it
+ourselves: `RPCListener` and the watch check in `WatchModel.check`.
+
+The catch is that replies don't carry a request id. Every session sees every reply, so requests have to go one at a
+time. On iOS `KLock` does that between our own sessions. Another host sending its own requests at the same moment can
+still take our reply, and nothing guards against that.
+
+Installing a watch face is the exception. The stock session binds the watch, so `RPCListener` stops for the install
+and the user has to close Nothing X first.
+
+## iOS in the background
+
+With `bluetooth-central`, iOS wakes the app on each BLE notify from the watch and gives it about 10 seconds. That's why
+every method answers within 8 s. `beginBackgroundTask` keeps the reply going until it's sent, but there's no extra time
+to count on.
+
+- Swiped away by the user: the app doesn't run at all until it's opened again.
+- Killed by the system: CoreBluetooth state restoration could bring it back. We don't use it yet, so the listener is
+  gone until the next launch.
+- After a reboot and before the first unlock, keychain items with the default protection can't be read, so there's no K.
+- Nobody knows yet whether a notify on the link Nothing X holds wakes our app at all. The DEBUG Wake probe
+  (`ios/App/WakeProbe.swift`) checks it, and it hasn't been run on hardware. If it doesn't wake, services on iOS only
+  work while the app is open.
+
+## Why not web modules
+
+The idea came up to do it like KernelSU: each module is config plus a web UI, and the app is a JS bridge to a web
+renderer. It doesn't fit here.
+
+The phone side runs in the background almost all the time. A web UI needs its screen open, so when a watch app asks for
+the weather with the phone in a pocket, nothing is there to answer. That's the hard part, and a web layer just sits
+next to it.
+
+Then there's the App Store. Downloading third-party JS that changes what the app does runs into guideline 2.5.2.
+KernelSU never goes through review. We do.
+
+Permissions are the third problem. Each watch app gets its own grant for calendar, location or notifications, and
+native code checks the OS permission before any service runs. A JS bridge would have to expose all of that again and
+keep modules from getting around it. A fixed list of methods is much easier to get right.
+
+So the phone side stays a small set of native services. A new capability is a new method in miniapp-rpc.md, not code
+loaded at runtime. Anyone who needs something much bigger can build their own companion on the same wire protocol.

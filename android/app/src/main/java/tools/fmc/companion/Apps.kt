@@ -57,6 +57,9 @@ import java.net.URLEncoder
 import org.json.JSONObject
 import tools.fmc.companion.wire.LoaderState
 import tools.fmc.companion.wire.PackageHeader
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Badge as CountPill
 
 // The apps on the watch and what each may use on the phone (docs/miniapp-rpc.md, "Permissions"): a list of apps,
@@ -77,14 +80,23 @@ class WatchApp(val name: String, val header: PackageHeader? = null, val slot: In
             val names = installed.map { it.name }.toSet()
             return installed + grants.packages().filter { it !in names }.map { WatchApp(it) }
         }
+
+        /** Every app in the FMC store, the ones on the watch with their version and slot. */
+        fun store(loader: LoaderState?): List<WatchApp> = StoreApps.all.map { l ->
+            loader?.apps?.entries?.firstOrNull { StoreApps.listing(it.value.name)?.slug == l.slug }
+                ?.let { WatchApp(it.value.name, it.value, it.key) } ?: WatchApp(l.slug)
+        }
     }
 }
 
 /** The FMC store's listing of watch apps (fmc.tools `apps`), matched to a package by slug or name. Loaded once per launch. */
 object StoreApps {
-    class Listing(val name: String, val icon: String?)
+    class Listing(val slug: String, val name: String, val icon: String?)
 
     private var byKey by mutableStateOf<Map<String, Listing>>(emptyMap())
+
+    /** By name, for the All segment. */
+    val all get() = byKey.values.distinct().sortedBy { it.name.lowercase() }
     private var loaded = false
 
     fun listing(pkg: String) = byKey[pkg.lowercase()]
@@ -109,7 +121,7 @@ object StoreApps {
             // ponytail: BitmapFactory has no SVG decoder, those apps keep the letter tile
             val url = if (icon.isEmpty() || icon.endsWith(".svg", ignoreCase = true)) null
                 else "$FMC/api/files/${r.getString("collectionId")}/${r.getString("id")}/$icon"
-            val l = Listing(r.getString("name"), url)
+            val l = Listing(r.getString("slug"), r.getString("name"), url)
             out[r.getString("slug").lowercase()] = l
             out[r.getString("name").lowercase()] = l
         }
@@ -172,13 +184,22 @@ fun NavRow(title: String, detail: String? = null, count: Int = 0, onClick: () ->
     }
 
 @Composable
-fun AppsScreen(model: AppModel, open: (String) -> Unit, back: () -> Unit) {
+fun AppsScreen(model: AppModel, open: (String) -> Unit) {
     val grants = liveGrants()
     LaunchedEffect(Unit) { StoreApps.load() }
-    val apps = WatchApp.all(model.loader, grants)
+    var showAll by remember { mutableStateOf(false) }
+    val apps = if (showAll) WatchApp.store(model.loader) else WatchApp.all(model.loader, grants)
     Column {
-        Bar("Apps", back)
+        Bar("Apps")
         LazyColumn {
+            item {
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    listOf("Installed", "All").forEachIndexed { i, label ->
+                        SegmentedButton(showAll == (i == 1), { showAll = i == 1 },
+                            SegmentedButtonDefaults.itemShape(i, 2)) { Text(label) }
+                    }
+                }
+            }
             val (on, off) = apps.partition { it.slot != null }
             fun group(title: String, list: List<WatchApp>, footer: String? = null) = item(title) {
                 Section(title, footer) {
@@ -188,8 +209,9 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit, back: () -> Unit) {
                     }
                 }
             }
-            if (on.isNotEmpty()) group("On the watch", on)
-            if (off.isNotEmpty()) {
+            if (showAll) { if (apps.isNotEmpty()) group("FMC store", apps) }
+            else if (on.isNotEmpty()) group("On the watch", on)
+            if (!showAll && off.isNotEmpty()) {
                 if (model.loader == null) group("Asked for permissions", off, "Connect on the Watch tab to see every app on the watch.")
                 else group("Not on the watch", off)
             }
@@ -197,7 +219,8 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit, back: () -> Unit) {
                 Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("No apps", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("Connect on the Watch tab to see the apps on the watch.", color = Fmc.secondary, textAlign = TextAlign.Center)
+                    Text(if (showAll) "Couldn't load the FMC store." else "Connect on the Watch tab to see the apps on the watch.",
+                        color = Fmc.secondary, textAlign = TextAlign.Center)
                 }
             }
         }
