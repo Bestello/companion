@@ -12,6 +12,7 @@
 		1371CC20EE343343ABD1DA2E /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F4B726EFA119F8A08A0ACE8 /* Keychain.swift */; };
 		16962170E187B80936244AFE /* BLELink.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7CE9B33B6B174A1EF287F66 /* BLELink.swift */; };
 		29A5F0695D20CD62976866A7 /* Catalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F5480D24AD98E796060A456 /* Catalog.swift */; };
+		2B0F21FD8581E221CA8AE3B6 /* FaceInstall.swift in Sources */ = {isa = PBXBuildFile; fileRef = 728879F0C797B91B298D9709 /* FaceInstall.swift */; };
 		4362579C1277D88E3644D3B5 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AFECBF78F1324F6CD84462 /* ContentView.swift */; };
 		5E95CBA89634EBA843284AE0 /* WatchModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3BB6347F0B47FDA2BACB52 /* WatchModel.swift */; };
 		6D7388A2D57938D53D35A746 /* FaceLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E717189BB9272DA6A41F8F /* FaceLinkTests.swift */; };
@@ -33,6 +34,7 @@
 		2F4B726EFA119F8A08A0ACE8 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
 		5F5480D24AD98E796060A456 /* Catalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Catalog.swift; sourceTree = "<group>"; };
 		661DDBFDDEE1A3553A8E5010 /* Account.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Account.swift; sourceTree = "<group>"; };
+		728879F0C797B91B298D9709 /* FaceInstall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceInstall.swift; sourceTree = "<group>"; };
 		79E717189BB9272DA6A41F8F /* FaceLinkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceLinkTests.swift; sourceTree = "<group>"; };
 		9011709E9E31B2E83D046922 /* Style.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Style.swift; sourceTree = "<group>"; };
 		959119DD04DE62417C85273A /* CatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogView.swift; sourceTree = "<group>"; };
@@ -74,6 +76,7 @@
 				5F5480D24AD98E796060A456 /* Catalog.swift */,
 				959119DD04DE62417C85273A /* CatalogView.swift */,
 				B1AFECBF78F1324F6CD84462 /* ContentView.swift */,
+				728879F0C797B91B298D9709 /* FaceInstall.swift */,
 				A61DF9313CB0EEB556139708 /* Info.plist */,
 				2F4B726EFA119F8A08A0ACE8 /* Keychain.swift */,
 				9011709E9E31B2E83D046922 /* Style.swift */,
@@ -200,6 +203,7 @@
 				29A5F0695D20CD62976866A7 /* Catalog.swift in Sources */,
 				0AD67CDEC9F904D2ADD95084 /* CatalogView.swift in Sources */,
 				4362579C1277D88E3644D3B5 /* ContentView.swift in Sources */,
+				2B0F21FD8581E221CA8AE3B6 /* FaceInstall.swift in Sources */,
 				1371CC20EE343343ABD1DA2E /* Keychain.swift in Sources */,
 				FF739CBC1BF6E89E4B6C94AE /* Style.swift in Sources */,
 				5E95CBA89634EBA843284AE0 /* WatchModel.swift in Sources */,

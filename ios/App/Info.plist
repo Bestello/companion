@@ -34,7 +34,7 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>FMC Companion connects to your watch to read which watch faces and apps are on it.</string>
+	<string>FMC Companion connects to your watch to install watch faces and to read which apps are on it.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

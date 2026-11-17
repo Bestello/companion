@@ -20,13 +20,17 @@ enum BLEError: LocalizedError {
 
 final class BLELink: NSObject, Link, @unchecked Sendable {
     static let service = CBUUID(string: "FFF0")
-    private static let known = [Uuid.cmdWrite, Uuid.cmdNotify, Uuid.shellWrite, Uuid.shellNotify]
-        .map { (CBUUID(string: $0), $0) }
+    private static let required = [Uuid.cmdWrite, Uuid.cmdNotify, Uuid.shellWrite, Uuid.shellNotify]
+    /// The stock upload pair: only the watchface install needs it.
+    private static let known = (required + [DataUuid.write, DataUuid.notify]).map { (CBUUID(string: $0), $0) }
+    private static let notifies = [Uuid.cmdNotify, Uuid.shellNotify, DataUuid.notify]
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
     private var chars: [String: CBCharacteristic] = [:]
-    private var handler: (@Sendable (String, Data) -> Void)?
+    /// Every session on the link gets every notification and keeps its own.
+    private var handlers: [@Sendable (String, Data) -> Void] = []
+    private let lock = NSLock()
     private var step: CheckedContinuation<Void, Error>?
     private var pendingServices = 0
 
@@ -38,11 +42,22 @@ final class BLELink: NSObject, Link, @unchecked Sendable {
         central = CBCentralManager(delegate: self, queue: .main)
     }
 
-    @MainActor func connect() async throws {
+    /// `scan`: with no link up (Nothing X closed, the system dropped it) look for the watch's advertisement, as
+    /// Bluefy's picker does, for up to 10 s.
+    @MainActor func connect(scan: Bool = false) async throws {
         if central.state != .poweredOn { try await wait() }
-        guard let p = central.retrieveConnectedPeripherals(withServices: [Self.service]).first else {
-            throw BLEError.noWatch
+        var found = central.retrieveConnectedPeripherals(withServices: [Self.service]).first
+        if found == nil, scan {
+            central.scanForPeripherals(withServices: nil)
+            let timeout = Task { @MainActor in
+                try await Task.sleep(for: .seconds(10))
+                finish(BLEError.noWatch)
+            }
+            defer { central.stopScan(); timeout.cancel() }
+            try await wait()
+            found = peripheral
         }
+        guard let p = found else { throw BLEError.noWatch }
         peripheral = p
         p.delegate = self
         central.connect(p)
@@ -60,7 +75,9 @@ final class BLELink: NSObject, Link, @unchecked Sendable {
         disconnect()
     }
 
-    func onNotify(_ handler: @escaping @Sendable (String, Data) -> Void) { self.handler = handler }
+    func onNotify(_ handler: @escaping @Sendable (String, Data) -> Void) {
+        lock.withLock { handlers.append(handler) }
+    }
 
     func write(_ uuid: String, _ data: Data) async throws {
         try await send(uuid, data)
@@ -104,6 +121,13 @@ extension BLELink: CBCentralManagerDelegate, CBPeripheralDelegate {
         }
     }
 
+    func centralManager(_ c: CBCentralManager, didDiscover p: CBPeripheral, advertisementData: [String: Any],
+                        rssi: NSNumber) {
+        guard peripheral == nil, (p.name ?? "").hasPrefix("CMF Watch") else { return }
+        peripheral = p
+        finish()
+    }
+
     func centralManager(_ c: CBCentralManager, didConnect p: CBPeripheral) {
         p.discoverServices(nil)
     }
@@ -129,19 +153,18 @@ extension BLELink: CBCentralManagerDelegate, CBPeripheralDelegate {
         }
         pendingServices -= 1
         guard pendingServices == 0 else { return }
-        guard Self.known.allSatisfy({ chars[$0.1] != nil }) else { return finish(BLEError.missing) }
-        p.setNotifyValue(true, for: chars[Uuid.cmdNotify]!)
-        p.setNotifyValue(true, for: chars[Uuid.shellNotify]!)
+        guard Self.required.allSatisfy({ chars[$0] != nil }) else { return finish(BLEError.missing) }
+        Self.notifies.compactMap { chars[$0] }.forEach { p.setNotifyValue(true, for: $0) }
     }
 
     func peripheral(_ p: CBPeripheral, didUpdateNotificationStateFor c: CBCharacteristic, error: Error?) {
         if let error { return finish(error) }
-        if chars[Uuid.cmdNotify]?.isNotifying == true, chars[Uuid.shellNotify]?.isNotifying == true { finish() }
+        if Self.notifies.compactMap({ chars[$0] }).allSatisfy(\.isNotifying) { finish() }
     }
 
     func peripheral(_ p: CBPeripheral, didUpdateValueFor c: CBCharacteristic, error: Error?) {
         guard let value = c.value, let name = Self.known.first(where: { $0.0 == c.uuid })?.1 else { return }
-        handler?(name, value)
+        lock.withLock { handlers }.forEach { $0(name, value) }
     }
 
     func peripheral(_ p: CBPeripheral, didWriteValueFor c: CBCharacteristic, error: Error?) {
