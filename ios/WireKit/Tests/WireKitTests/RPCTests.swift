@@ -69,8 +69,7 @@ private let rv = RPCVectors.shared
 
 @Test func rpcUtf8Cut() {
     for c in rv.utf8_cut { #expect(utf8Cut(c.text, c.max) == hex(c.hex), "\(c.text)") }
-    // not in the vectors: a text of exactly max bytes is cut too (Android does the same; open question in the spec)
-    #expect(utf8Cut(String(repeating: "a", count: 64), 64).count == 63)
+    #expect(utf8Cut(String(repeating: "a", count: 65), 64).count == 64)
 }
 
 @Test func rpcCalendarRecords() {

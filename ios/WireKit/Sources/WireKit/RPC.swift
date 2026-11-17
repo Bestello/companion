@@ -37,13 +37,12 @@ public func replies(id: UInt8, status: RPCStatus, records: [Data]) -> [Data] {
     return records.enumerated().map { head($0, records.count) + $1 }
 }
 
-/// UTF-8, cut at a character boundary to under `max` bytes: the utf8_cut vectors keep 62 of a text whose first 64
-/// bytes end on a boundary, so the size reads as a buffer with its NUL (the spec says "≤ max"; reported).
+/// UTF-8, cut to at most `max` bytes at a character boundary.
 public func utf8Cut(_ s: String, _ max: Int) -> Data {
     var out = Data()
     for c in s {
         let u = Data(String(c).utf8)
-        guard out.count + u.count < max else { break }
+        guard out.count + u.count <= max else { break }
         out += u
     }
     return out
