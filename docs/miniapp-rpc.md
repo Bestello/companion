@@ -64,8 +64,8 @@ collection for apps; it would only pre-fill these grants.
 ## Messages
 
 All integers little-endian. Every RPC message opens with `R1`, so a miniapp keeps its own messages (any other prefix)
-on the same channel. A message that opens with `R1` but is not a request the phone can read gets `BAD_REQUEST`
-(if it has an id byte) or is dropped.
+on the same channel. Only `R1Q` is a request; any other `R1x` is dropped. An `R1Q` the phone cannot read (no method
+byte, unknown method, bad args) gets `BAD_REQUEST` if it has an id byte, else it is dropped.
 
 Request (watch → phone):
 
@@ -96,7 +96,8 @@ Reply (phone → watch):
 | 4 `ASK` | the user has not answered yet; the phone asked. Show "Allow on your phone" |
 | 5 `TOO_LARGE` | `http.get` body over 2048 bytes |
 
-Text fields are UTF-8, cut by the phone at a character boundary to the stated size (`utf8_cut` vectors).
+Text fields are UTF-8, cut by the phone to at most the stated size, at a character boundary (`utf8_cut` vectors:
+64 Cyrillic-only bytes stay 64).
 Characters the watch has no glyph for stay as they are (they draw as `?`).
 
 ## Methods
@@ -112,7 +113,8 @@ Characters the watch has no glyph for stay as they are (they draw as `?`).
 
 ### `0x01 caps`
 
-Args: none. One record: the method ids this package may call now (granted and OS permission on), one byte each.
+Args: none. One record: the method ids this package may call now (granted and OS permission on), one byte each,
+without `0x01` itself; `0x40` when any host is granted.
 A miniapp calls it at start to tell "allow on your phone" from an empty result.
 
 ### `0x10 calendar.events`
@@ -150,7 +152,7 @@ is in the foreground or when asked and allowed; no fix at all: `UNAVAILABLE`.
 
 ### `0x30 weather`
 
-Args: `days:u8`, 0–7: daily records wanted after the current one. Records (`weather` vectors):
+Args: `days:u8`, 0–7: daily records for days 0…days−1, after the current one. Records (`weather` vectors):
 
 ```
 current: 0:u8 ‖ temp:i16 ‖ code:u8 ‖ wind:u8 ‖ humidity:u8 ‖ age:u8
