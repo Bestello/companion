@@ -36,7 +36,7 @@
   {
    "text": "Созвон с командой по релизу и обсуждение планов на квартал",
    "max": 64,
-   "hex": "d0a1d0bed0b7d0b2d0bed0bd20d18120d0bad0bed0bcd0b0d0bdd0b4d0bed0b920d0bfd0be20d180d0b5d0bbd0b8d0b7d18320d0b820d0bed0b1d181d183"
+   "hex": "d0a1d0bed0b7d0b2d0bed0bd20d18120d0bad0bed0bcd0b0d0bdd0b4d0bed0b920d0bfd0be20d180d0b5d0bbd0b8d0b7d18320d0b820d0bed0b1d181d183d0b6"
   },
   {
    "text": "ab€",
@@ -95,7 +95,7 @@
     "title": "Созвон с командой по релизу и обсуждение планов на квартал",
     "show": true
    },
-   "hex": "ff64057800001f00d0a1d0bed0b7d0b2d0bed0bd20d18120d0bad0bed0bcd0b0d0bdd0b4d0bed0b920d0bfd0be20d180d0b5d0bbd0b8d0b7d18320d0b820d0bed0b1d181d183"
+   "hex": "ff64057800001f00d0a1d0bed0b7d0b2d0bed0bd20d18120d0bad0bed0bcd0b0d0bdd0b4d0bed0b920d0bfd0be20d180d0b5d0bbd0b8d0b7d18320d0b820d0bed0b1d181d183d0b6"
   }
  ],
  "calendar_dates": [
