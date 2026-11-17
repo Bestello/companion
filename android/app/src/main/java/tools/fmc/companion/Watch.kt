@@ -86,9 +86,24 @@ suspend fun fetchFace(face: Watchface): Pair<ByteArray, FaceVerdict> {
  * Nothing X first, and may have to add the watch to it again afterwards (fmc issue #27); the UI says so first.
  */
 /** A dial on the watch. [index]: its place in the watch's own carousel, the only handle on a dial nobody named. */
-data class DialSlot(val id: Long, val index: Int, val name: String?) {
+/**
+ * The watch only reports ids: faces this app installed keep their name and preview, stock ones are named from
+ * fmc.tools' stock-dials.json, Nothing X gallery ones have nothing to go on.
+ */
+data class DialSlot(val id: Long, val index: Int, val name: String?, val preview: String? = null) {
     val label get() = name ?: "Face ${index + 1}"
 }
+
+/** fmc_frontend modules/device/lib/stock-dials.json (assets): id → name of the factory and Nothing gallery faces. */
+private var stock: Map<Long, String>? = null
+
+fun stockDials(context: Context): Map<Long, String> = stock ?: runCatching {
+    val j = org.json.JSONObject(context.assets.open("stock-dials.json").bufferedReader().readText())
+    j.keys().asSequence().associate { it.toLong() to j.getJSONObject(it).getString("name") }
+}.getOrDefault(emptyMap()).also { stock = it }
+
+private fun slot(context: Context, prefs: android.content.SharedPreferences, id: Long, i: Int) =
+    DialSlot(id, i, prefs.getString("name-$id", null) ?: stockDials(context)[id], prefs.getString("preview-$id", null))
 
 /** The watch's faces as the last install from this app saw them. */
 class FacesOnWatch(
@@ -104,7 +119,7 @@ fun facesOnWatch(context: Context): FacesOnWatch {
     val prefs = context.getSharedPreferences("dials", Context.MODE_PRIVATE)
     val ids = prefs.getString("faces-on-watch", "")!!.split(",").mapNotNull { it.toLongOrNull() }
     return FacesOnWatch(
-        ids.mapIndexed { i, d -> DialSlot(d, i, prefs.getString("name-$d", null)) },
+        ids.mapIndexed { i, d -> slot(context, prefs, d, i) },
         prefs.getLong("faces-on-watch-date", 0),
         prefs.getString("faces-on-watch-count", null)?.split(",")?.let { (n, c) -> "$n of $c" },
         prefs.getString("faces-on-watch-header", "")!!,
@@ -151,7 +166,7 @@ suspend fun installFaceOnWatch(
         val cap = counted?.capacity ?: CAPACITY
         val full = counted?.let { it.count >= it.capacity } ?: (installed.size >= CAPACITY)
         // which dial to replace (ble.ts NoFreeSlotError, slot-dialog.svelte)
-        suspend fun ask() = pick(installed.mapIndexed { i, d -> DialSlot(d, i, prefs.getString("name-$d", null)) })
+        suspend fun ask() = pick(installed.mapIndexed { i, d -> slot(context, prefs, d, i) })
             ?: throw CancellationException("no dial picked")
         // full and not a re-install of this face: ask before sending anything
         var slot: Long? = if (full && dialId(seed) !in installed) ask() else null

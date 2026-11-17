@@ -17,6 +17,8 @@
 		5E95CBA89634EBA843284AE0 /* WatchModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3BB6347F0B47FDA2BACB52 /* WatchModel.swift */; };
 		6D7388A2D57938D53D35A746 /* FaceLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E717189BB9272DA6A41F8F /* FaceLinkTests.swift */; };
 		84A9930F50E50DA86B3CBEFD /* Account.swift in Sources */ = {isa = PBXBuildFile; fileRef = 661DDBFDDEE1A3553A8E5010 /* Account.swift */; };
+		876ED2DDDC5F80ABC8F6DD5D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DBEA972FC799568E96B70EE6 /* Assets.xcassets */; };
+		D6D3564BAC7E915C04695771 /* stock-dials.json in Resources */ = {isa = PBXBuildFile; fileRef = 49774F9C3C84BAA91D96604A /* stock-dials.json */; };
 		FF739CBC1BF6E89E4B6C94AE /* Style.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9011709E9E31B2E83D046922 /* Style.swift */; };
 /* End PBXBuildFile section */
 
@@ -32,6 +34,7 @@
 
 /* Begin PBXFileReference section */
 		2F4B726EFA119F8A08A0ACE8 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
+		49774F9C3C84BAA91D96604A /* stock-dials.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "stock-dials.json"; sourceTree = "<group>"; };
 		5F5480D24AD98E796060A456 /* Catalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Catalog.swift; sourceTree = "<group>"; };
 		661DDBFDDEE1A3553A8E5010 /* Account.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Account.swift; sourceTree = "<group>"; };
 		728879F0C797B91B298D9709 /* FaceInstall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceInstall.swift; sourceTree = "<group>"; };
@@ -41,6 +44,7 @@
 		A61DF9313CB0EEB556139708 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		B1AFECBF78F1324F6CD84462 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		C5C17297712958511DC00515 /* FMCCompanionTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FMCCompanionTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		DBEA972FC799568E96B70EE6 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		DE16AEA354DD402560E64E35 /* FMCCompanion.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = FMCCompanion.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E55854D2ED8B3149C926663E /* WireKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = WireKit; path = WireKit; sourceTree = SOURCE_ROOT; };
 		EF3BB6347F0B47FDA2BACB52 /* WatchModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchModel.swift; sourceTree = "<group>"; };
@@ -72,6 +76,7 @@
 			isa = PBXGroup;
 			children = (
 				661DDBFDDEE1A3553A8E5010 /* Account.swift */,
+				DBEA972FC799568E96B70EE6 /* Assets.xcassets */,
 				F7CE9B33B6B174A1EF287F66 /* BLELink.swift */,
 				5F5480D24AD98E796060A456 /* Catalog.swift */,
 				959119DD04DE62417C85273A /* CatalogView.swift */,
@@ -79,6 +84,7 @@
 				728879F0C797B91B298D9709 /* FaceInstall.swift */,
 				A61DF9313CB0EEB556139708 /* Info.plist */,
 				2F4B726EFA119F8A08A0ACE8 /* Keychain.swift */,
+				49774F9C3C84BAA91D96604A /* stock-dials.json */,
 				9011709E9E31B2E83D046922 /* Style.swift */,
 				EF3BB6347F0B47FDA2BACB52 /* WatchModel.swift */,
 			);
@@ -137,6 +143,7 @@
 			buildConfigurationList = 69C6128B5EB9F2A0128E44F0 /* Build configuration list for PBXNativeTarget "FMCCompanion" */;
 			buildPhases = (
 				36B059E8E078E85E9A24A786 /* Sources */,
+				7A0A0B696FFB663893BFE986 /* Resources */,
 				FE9D5178B21699DB98AAB646 /* Frameworks */,
 			);
 			buildRules = (
@@ -184,6 +191,18 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		7A0A0B696FFB663893BFE986 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				876ED2DDDC5F80ABC8F6DD5D /* Assets.xcassets in Resources */,
+				D6D3564BAC7E915C04695771 /* stock-dials.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		1CB52DF792055ECCE0589A6E /* Sources */ = {

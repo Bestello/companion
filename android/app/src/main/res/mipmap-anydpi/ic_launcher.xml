@@ -1,5 +1,6 @@
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <!-- generated_imgs njbvvs (nanobanana), same art as the iOS AppIcon -->
+    <foreground android:drawable="@drawable/ic_launcher_art" />
     <monochrome android:drawable="@drawable/ic_launcher_foreground" />
 </adaptive-icon>

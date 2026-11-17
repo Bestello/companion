@@ -1,4 +1,5 @@
 import SwiftUI
+import WireKit
 
 /// The FMC catalog and, signed in, the user's own faces (fmc_frontend market.svelte and profile.svelte):
 /// a grid of round previews, search by name or author.
@@ -245,6 +246,7 @@ struct FaceDetail: View {
             }) { p in
                 Task { @MainActor in progress = Double(p) / 100 }
             }
+            UserDefaults.standard.set(face.previewURL, forKey: "dial-preview-\(dialId(face.id))")
             installed = true
         } catch is CancellationError {
         } catch {

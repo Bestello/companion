@@ -1,6 +1,14 @@
 package tools.fmc.companion
 
 import android.Manifest
+import tools.fmc.companion.wire.dialId
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -223,6 +231,7 @@ fun FaceScreen(model: AppModel, id: String, back: () -> Unit) {
             installFaceOnWatch(context, model.store, bin, f.id, f.name, pick = { slots ->
                 CompletableDeferred<Long?>().also { picking = slots to it }.await()
             }) { p -> scope.launch { progress = p / 100f } }
+            context.getSharedPreferences("dials", 0).edit().putString("preview-${dialId(f.id)}", f.previewURL).apply()
             installed = true
         } catch (e: CancellationException) {
             if (!isActive) throw e // a dismissed slot dialog cancels the install, not the screen
@@ -406,10 +415,26 @@ fun WatchScreen(model: AppModel, signIn: () -> Unit) {
                         if (on.header.isEmpty()) "" else "\nWatch header: ${on.header}") {
                     val faces = on.faces
                     if (faces.isEmpty()) Text("Install a face to see what's on the watch", color = Fmc.secondary)
-                    faces.forEach { face ->
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                            Badge { Text("${face.index + 1}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
-                            Text(face.label, fontWeight = FontWeight.SemiBold)
+                    // as Nothing X and fmc.tools show them: the round previews in the watch's own order. An FMC face,
+                    // from here or fmc.tools, is dialId(record id) and has its catalog preview.
+                    faces.chunked(3).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                            row.forEach { slot ->
+                                val face = (model.mine + model.all).firstOrNull { dialId(it.id) == slot.id }
+                                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    val url = face?.previewURL ?: slot.preview
+                                    if (url != null) FacePreview(url, Modifier.fillMaxWidth())
+                                    else Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(CircleShape).background(Color.Black),
+                                        contentAlignment = Alignment.Center) {
+                                        // no picture anywhere for stock and Nothing X faces: the watch's place for it
+                                        Text("${slot.index + 1}", color = Color(0xFFFFC700), fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    Text(face?.name ?: slot.label, style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                         }
                     }
                 }
