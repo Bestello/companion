@@ -11,8 +11,11 @@
 		1076436FDFC947C41B97C816 /* WireKit in Frameworks */ = {isa = PBXBuildFile; productRef = DCBA60A6C6635A5AAC71E3C7 /* WireKit */; };
 		1371CC20EE343343ABD1DA2E /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F4B726EFA119F8A08A0ACE8 /* Keychain.swift */; };
 		16962170E187B80936244AFE /* BLELink.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7CE9B33B6B174A1EF287F66 /* BLELink.swift */; };
+		1D80FB73F6798157FE257CD1 /* RPCListener.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BC5DDCA55F73C76DE5A0A1A /* RPCListener.swift */; };
 		29A5F0695D20CD62976866A7 /* Catalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F5480D24AD98E796060A456 /* Catalog.swift */; };
 		2B0F21FD8581E221CA8AE3B6 /* FaceInstall.swift in Sources */ = {isa = PBXBuildFile; fileRef = 728879F0C797B91B298D9709 /* FaceInstall.swift */; };
+		38ABB8F0262BB680D34A9295 /* PhoneServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30DA1CDE26DDC84EF3446F4 /* PhoneServices.swift */; };
+		3B5D6A2DE0ED5040C869738E /* Permissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA49EF6F02E958F9DAF1FB07 /* Permissions.swift */; };
 		4362579C1277D88E3644D3B5 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AFECBF78F1324F6CD84462 /* ContentView.swift */; };
 		5E95CBA89634EBA843284AE0 /* WatchModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3BB6347F0B47FDA2BACB52 /* WatchModel.swift */; };
 		6D7388A2D57938D53D35A746 /* FaceLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E717189BB9272DA6A41F8F /* FaceLinkTests.swift */; };
@@ -32,7 +35,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		2BC5DDCA55F73C76DE5A0A1A /* RPCListener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCListener.swift; sourceTree = "<group>"; };
 		2F4B726EFA119F8A08A0ACE8 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
+		3D306508B22A1C6013C76A19 /* FMCCompanion.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FMCCompanion.entitlements; sourceTree = "<group>"; };
 		5F5480D24AD98E796060A456 /* Catalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Catalog.swift; sourceTree = "<group>"; };
 		661DDBFDDEE1A3553A8E5010 /* Account.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Account.swift; sourceTree = "<group>"; };
 		728879F0C797B91B298D9709 /* FaceInstall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceInstall.swift; sourceTree = "<group>"; };
@@ -40,9 +45,11 @@
 		835AD9304F35D07A99527346 /* WakeProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeProbe.swift; sourceTree = "<group>"; };
 		9011709E9E31B2E83D046922 /* Style.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Style.swift; sourceTree = "<group>"; };
 		959119DD04DE62417C85273A /* CatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogView.swift; sourceTree = "<group>"; };
+		A30DA1CDE26DDC84EF3446F4 /* PhoneServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneServices.swift; sourceTree = "<group>"; };
 		A61DF9313CB0EEB556139708 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		B1AFECBF78F1324F6CD84462 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		C5C17297712958511DC00515 /* FMCCompanionTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FMCCompanionTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		DA49EF6F02E958F9DAF1FB07 /* Permissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Permissions.swift; sourceTree = "<group>"; };
 		DE16AEA354DD402560E64E35 /* FMCCompanion.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = FMCCompanion.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E55854D2ED8B3149C926663E /* WireKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = WireKit; path = WireKit; sourceTree = SOURCE_ROOT; };
 		EF3BB6347F0B47FDA2BACB52 /* WatchModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchModel.swift; sourceTree = "<group>"; };
@@ -79,8 +86,12 @@
 				959119DD04DE62417C85273A /* CatalogView.swift */,
 				B1AFECBF78F1324F6CD84462 /* ContentView.swift */,
 				728879F0C797B91B298D9709 /* FaceInstall.swift */,
+				3D306508B22A1C6013C76A19 /* FMCCompanion.entitlements */,
 				A61DF9313CB0EEB556139708 /* Info.plist */,
 				2F4B726EFA119F8A08A0ACE8 /* Keychain.swift */,
+				DA49EF6F02E958F9DAF1FB07 /* Permissions.swift */,
+				A30DA1CDE26DDC84EF3446F4 /* PhoneServices.swift */,
+				2BC5DDCA55F73C76DE5A0A1A /* RPCListener.swift */,
 				9011709E9E31B2E83D046922 /* Style.swift */,
 				835AD9304F35D07A99527346 /* WakeProbe.swift */,
 				EF3BB6347F0B47FDA2BACB52 /* WatchModel.swift */,
@@ -208,6 +219,9 @@
 				4362579C1277D88E3644D3B5 /* ContentView.swift in Sources */,
 				2B0F21FD8581E221CA8AE3B6 /* FaceInstall.swift in Sources */,
 				1371CC20EE343343ABD1DA2E /* Keychain.swift in Sources */,
+				3B5D6A2DE0ED5040C869738E /* Permissions.swift in Sources */,
+				38ABB8F0262BB680D34A9295 /* PhoneServices.swift in Sources */,
+				1D80FB73F6798157FE257CD1 /* RPCListener.swift in Sources */,
 				FF739CBC1BF6E89E4B6C94AE /* Style.swift in Sources */,
 				EED6A58529E6B025F772E522 /* WakeProbe.swift in Sources */,
 				5E95CBA89634EBA843284AE0 /* WatchModel.swift in Sources */,
@@ -292,6 +306,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/FMCCompanion.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -349,6 +364,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/FMCCompanion.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
