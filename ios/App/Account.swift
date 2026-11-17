@@ -34,7 +34,7 @@ struct OAuthProvider: Decodable, Identifiable {
 }
 
 @MainActor @Observable final class Account {
-    static let base = URL(string: "https://fmc.tools")!
+    nonisolated static let base = URL(string: "https://fmc.tools")!
     static let signUp = URL(string: "https://fmc.tools/register")!
     nonisolated static let redirect = URL(string: "https://fmc.tools/api/oauth2-redirect")!
 
@@ -135,6 +135,11 @@ struct OAuthProvider: Decodable, Identifiable {
         let (data, response) = try await URLSession.shared.data(for: r)
         try check(response, data)
         signOut()
+    }
+
+    /// Adds the FMC token to a request for the user's own records.
+    func authorize(_ r: inout URLRequest) {
+        if let token { r.setValue(token, forHTTPHeaderField: "Authorization") }
     }
 
     func signOut() {

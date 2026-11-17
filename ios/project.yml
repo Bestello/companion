@@ -22,6 +22,10 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSBluetoothAlwaysUsageDescription: FMC Companion connects to your watch to read which watch faces and apps are on it.
         ITSAppUsesNonExemptEncryption: false
+        # fmc://install?url=… from the Install button on fmc.tools (FaceLink in Catalog.swift)
+        CFBundleURLTypes:
+          - CFBundleURLName: tools.fmc.companion
+            CFBundleURLSchemes: [fmc]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: tools.fmc.companion
@@ -31,6 +35,19 @@ targets:
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: NO
+  FMCCompanionTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [AppTests]
+    dependencies:
+      - target: FMCCompanion
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.0"
+        # the app's PRODUCT_NAME has a space, so xcodegen's default host path misses it
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/FMC Companion.app/FMC Companion"
+        BUNDLE_LOADER: "$(TEST_HOST)"
 schemes:
   FMCCompanion:
     build:
@@ -38,4 +55,5 @@ schemes:
         FMCCompanion: all
     test:
       targets:
+        - FMCCompanionTests
         - package: WireKit/WireKitTests

@@ -5,19 +5,45 @@ import WireKit
 struct FMCCompanionApp: App {
     @State private var account = Account()
     @State private var watch = WatchModel()
+    @State private var catalog = Catalog()
+    @State private var tab = CommandLine.arguments.contains("-watch") ? 1 : 0
+    /// The catalog's navigation: face ids. A link to a face replaces it.
+    @State private var path: [String] = []
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environment(account)
-                .environment(watch)
-                .tint(.fmcAccent)
-                .task { await account.restore() }
-                #if DEBUG
-                // Screenshots: `-demo YES -check` reads the sample watch on launch
-                .task { if CommandLine.arguments.contains("-check") { await watch.check() } }
-                #endif
+            TabView(selection: $tab) {
+                CatalogView(path: $path)
+                    .tabItem { Label("Watch faces", systemImage: "square.grid.2x2") }
+                    .tag(0)
+                ContentView()
+                    .tabItem { Label("Watch", systemImage: "applewatch") }
+                    .tag(1)
+            }
+            .onOpenURL(perform: open)
+            .environment(account)
+            .environment(watch)
+            .environment(catalog)
+            .tint(.fmcAccent)
+            .task { await account.restore() }
+            #if DEBUG
+            // Screenshots: `-demo YES -check` reads the sample watch on launch
+            .task { if CommandLine.arguments.contains("-check") { await watch.check() } }
+            // `-open <link>`: what onOpenURL gets, without the system's "Open in" prompt
+            .task {
+                let a = CommandLine.arguments
+                if let i = a.firstIndex(of: "-open"), i + 1 < a.count, let url = URL(string: a[i + 1]) { open(url) }
+            }
+            #endif
         }
+    }
+}
+
+extension FMCCompanionApp {
+    func open(_ url: URL) {
+        guard let id = FaceLink.watchface(url) else { return }
+        tab = 0
+        path = [id]
     }
 }
 
