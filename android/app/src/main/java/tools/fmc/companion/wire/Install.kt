@@ -8,7 +8,8 @@ const val LOADER_SLOT = 0xFF
 private const val HEADER_SIZE = 64
 private const val DATA_MAX = 128
 
-data class PackageHeader(val kind: Int, val name: String, val version: Long)
+/** `crc`: CRC-32 of the image, tells two builds with the same version apart (the loader's version stays 1). */
+data class PackageHeader(val kind: Int, val name: String, val version: Long, val crc: Long = 0)
 
 sealed class InstallError(message: String) : Exception(message) {
     data object Busy : InstallError("the app is running on the watch")
@@ -17,11 +18,12 @@ sealed class InstallError(message: String) : Exception(message) {
     data class Refused(val status: Int) : InstallError("refused (%02X)".format(status))
 }
 
-/** The package header (`package.HEADER`: magic "WP2A", abi, kind, abi_minor, name[24], version, …). */
+/** The package header (`package.HEADER`: magic "WP2A", abi, kind, abi_minor, name[24], version, size, entry,
+ * relocations, crc, …). */
 fun parseHeader(d: ByteArray): PackageHeader? {
     if (d.size < HEADER_SIZE || !d.copyOf(4).contentEquals("WP2A".toByteArray())) return null
     val name = d.copyOfRange(8, 32).takeWhile { it != 0.toByte() }.toByteArray()
-    return PackageHeader(d.u8(6), String(name), d.le32(32))
+    return PackageHeader(d.u8(6), String(name), d.le32(32), d.le32(48))
 }
 
 private fun check(r: ByteArray): ByteArray {
