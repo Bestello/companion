@@ -25,7 +25,10 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -125,15 +128,24 @@ private val images = LruCache<String, ImageBitmap>(80)
 /** The watch's 466×466 round panel. */
 @Composable
 fun FacePreview(url: String?, modifier: Modifier = Modifier) {
-    val bitmap by produceState(url?.let(images::get), url) {
-        if (value == null && url != null) {
-            value = runCatching {
+    val bitmap = rememberImage(url)
+    Box(modifier.aspectRatio(1f).clip(CircleShape).background(Color.Black)) {
+        bitmap?.let { Image(it, null, Modifier.matchParentSize(), contentScale = ContentScale.Fit) }
+    }
+}
+
+/** A picture from the web, decoded once per launch; null while loading, on failure or for a format Android can't decode. */
+@Composable
+fun rememberImage(url: String?): ImageBitmap? {
+    // keyed by url: the same call site showing another picture starts over
+    var bitmap by remember(url) { mutableStateOf(url?.let(images::get)) }
+    LaunchedEffect(url) {
+        if (bitmap == null && url != null) {
+            bitmap = runCatching {
                 val raw = download(url)
                 BitmapFactory.decodeByteArray(raw, 0, raw.size).asImageBitmap().also { images.put(url, it) }
             }.getOrNull()
         }
     }
-    Box(modifier.aspectRatio(1f).clip(CircleShape).background(Color.Black)) {
-        bitmap?.let { Image(it, null, Modifier.matchParentSize(), contentScale = ContentScale.Fit) }
-    }
+    return bitmap
 }

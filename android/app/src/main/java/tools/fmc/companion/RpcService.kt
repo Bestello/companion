@@ -45,7 +45,7 @@ class RpcService : Service() {
             .setSmallIcon(R.drawable.ic_watch)
             .setContentTitle("Watch apps can reach your phone")
             .setContentText("Calendar, weather and the rest, as you allowed them.")
-            .setContentIntent(permissionsIntent(this))
+            .setContentIntent(appsIntent(this))
             .setOngoing(true)
             .build()
         val location = if (granted(this, Manifest.permission.ACCESS_COARSE_LOCATION)) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
@@ -81,11 +81,13 @@ class RpcService : Service() {
                     KSession.open(link).also { store[account] = it.second }.first
                 }
                 Log.i(TAG, "listening")
+                DevLog.log(this, "listening")
                 listen(session, phone)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.w(TAG, "link: ${e.message}")
+                DevLog.log(this, "link: ${e.message}")
             } finally {
                 link.disconnect()
             }
@@ -107,10 +109,13 @@ class RpcService : Service() {
             if (parseRequest(m) == null) continue
             val pkg = names[slot] ?: packageIn(s, slot)?.also { names[slot] = it } ?: continue
             val replies = answer(pkg, m, phone) ?: continue
+            val line = DevLog.request(pkg, m, replies)
             try {
                 for (r in replies) s.send(r)
+                DevLog.log(this, "$line, ${replies.size} msg")
             } catch (e: WireError) {
                 Log.w(TAG, "reply to $pkg: ${e.message}") // the app closed meanwhile
+                DevLog.log(this, "$line, send failed: ${e.message}")
             }
         }
     }
