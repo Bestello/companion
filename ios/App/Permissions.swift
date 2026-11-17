@@ -19,8 +19,8 @@ import WireKit
     }
 
     private(set) var store: Store
-    /// The ask notification was tapped: the Watch tab opens the Permissions screen.
-    var showScreen = false
+    /// The package whose ask notification was tapped: the Watch tab opens its page.
+    var open: String?
 
     private init() {
         store = UserDefaults.standard.data(forKey: Self.key).flatMap { try? JSONDecoder().decode(Store.self, from: $0) }
@@ -43,6 +43,25 @@ import WireKit
 
     func grants(_ package: String) -> [String: Bool] { store.grants[package] ?? [:] }
 
+    /// Every cap the package asked for or has an answer for.
+    func caps(_ package: String) -> [String] {
+        Set(grants(package).keys).union(store.asked[package].map { Array($0.keys) } ?? []).sorted()
+    }
+
+    func isPending(_ package: String, _ cap: String) -> Bool {
+        store.asked[package]?[cap] != nil && store.grants[package]?[cap] == nil
+    }
+
+    func pendingCount(_ package: String) -> Int { caps(package).filter { isPending(package, $0) }.count }
+
+    /// Forgets every answer: the next calls ask again.
+    func reset(_ package: String) {
+        store.grants[package] = nil
+        store.asked[package] = nil
+        store.showText.remove(package)
+        save()
+    }
+
     func ask(_ package: String, _ cap: String, now: Date = .now) {
         if let last = store.asked[package]?[cap], now.timeIntervalSince(last) < 86_400 { return }
         store.asked[package, default: [:]][cap] = now
@@ -50,6 +69,7 @@ import WireKit
         let n = UNMutableNotificationContent()
         n.title = String(localized: "\(package) wants \(Self.label(cap))")
         n.body = String(localized: "Allow or deny it in FMC Companion.")
+        n.userInfo = ["package": package]
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "ask-\(package)-\(cap)", content: n,
                                                                     trigger: nil))
     }
@@ -59,13 +79,6 @@ import WireKit
         store.grants[package, default: [:]][cap] = allowed
         save()
         if allowed { Task { await PhoneServices.shared.requestOS(cap) } }
-    }
-
-    /// Forgets the answer: the next call asks again.
-    func revoke(_ package: String, _ cap: String) {
-        store.grants[package]?[cap] = nil
-        store.asked[package]?[cap] = nil
-        save()
     }
 
     func showText(_ package: String) -> Bool { store.showText.contains(package) }
@@ -84,60 +97,4 @@ import WireKit
         default: cap.hasPrefix("http:") ? String(localized: "the web: \(String(cap.dropFirst(5)))") : cap
         }
     }
-}
-
-struct PermissionsView: View {
-    private var perms = Permissions.shared
-
-    var body: some View {
-        List {
-            let pending = perms.pending
-            if !pending.isEmpty {
-                Section("Asking now") {
-                    ForEach(pending, id: \.self) { a in
-                        let (p, cap) = (a.package, a.cap)
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("\(p) wants \(Permissions.label(cap))").font(.body.weight(.semibold))
-                            HStack {
-                                Button("Allow") { perms.set(p, cap, true) }.buttonStyle(.borderedProminent)
-                                Button("Deny", role: .destructive) { perms.set(p, cap, false) }.buttonStyle(.bordered)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-            }
-            ForEach(perms.packages, id: \.self) { p in
-                let grants = perms.grants(p).sorted { $0.key < $1.key }
-                Section {
-                    ForEach(grants, id: \.key) { cap, allowed in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Toggle(Permissions.label(cap).capitalizedFirst,
-                                   isOn: Binding(get: { allowed }, set: { perms.set(p, cap, $0) }))
-                            if allowed, !PhoneServices.shared.osAllowed(cap) {
-                                Link("Off in iOS Settings", destination: URL(string: UIApplication.openSettingsURLString)!)
-                                    .font(.footnote)
-                            }
-                        }
-                        .swipeActions { Button("Revoke", role: .destructive) { perms.revoke(p, cap) } }
-                    }
-                    Toggle("Show text on the watch",
-                           isOn: Binding(get: { perms.showText(p) }, set: { perms.setShowText(p, $0) }))
-                } header: {
-                    Text(p)
-                } footer: {
-                    Text("Calendar titles and notification text. Anyone nearby with a Bluetooth scanner could read what goes to the watch, location included (rounded to about 10 km). Swipe a permission to revoke it.")
-                }
-            }
-            if perms.packages.isEmpty {
-                Text("Watch apps that ask for your calendar, location, weather or the web show up here.")
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .navigationTitle("Permissions")
-    }
-}
-
-private extension String {
-    var capitalizedFirst: String { prefix(1).uppercased() + dropFirst() }
 }

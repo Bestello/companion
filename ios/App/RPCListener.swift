@@ -74,15 +74,22 @@ actor KLock {
         do {
             try await link.connect()
             let (session, state) = try await KLock.shared.run { try await WatchModel.open(link) }
-            guard let state else { return true }
+            guard let state else {
+                DevLog.shared.log("stock firmware: not listening")
+                return true
+            }
             apps = state.apps.mapValues(\.name)
             _ = try await KLock.shared.run { try await session.ping() } // registers: the stub sends us EVENTs
             _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+            DevLog.shared.log("listening")
             while up, !Task.isCancelled {
                 guard let m = try? await session.recvFrom(timeout: .seconds(5)) else { continue }
                 await handle(m.data, slot: Int(m.slot), session)
             }
-        } catch {}
+            DevLog.shared.log("link dropped")
+        } catch {
+            DevLog.shared.log("link: \(error.localizedDescription)")
+        }
         return false
     }
 
@@ -95,13 +102,22 @@ actor KLock {
             apps = state.apps.mapValues(\.name)
         }
         guard let out = await answer(message, package: apps[slot], host: PhoneServices.shared) else { return }
-        try? await KLock.shared.run {
-            for m in out { try await session.send(m) }
+        // "R1Q id method …" in, "R1A id status index total" out
+        let method = message.count > 4 ? DevLog.methods[message[message.startIndex + 4]] ?? "?" : "?"
+        let status = out.first.flatMap { $0.count > 4 ? Int($0[$0.startIndex + 4]) : nil }
+            .map { $0 < DevLog.statuses.count ? DevLog.statuses[$0] : "\($0)" } ?? "?"
+        do {
+            try await KLock.shared.run {
+                for m in out { try await session.send(m) }
+            }
+            DevLog.shared.log("\(apps[slot] ?? "slot \(slot)") \(method) → \(status), \(out.count) msg")
+        } catch {
+            DevLog.shared.log("\(apps[slot] ?? "slot \(slot)") \(method) → \(status), send failed: \(error)")
         }
     }
 }
 
-/// Starts the listener at launch (a background launch has no scene) and opens Permissions from the ask notification.
+/// Starts the listener at launch (a background launch has no scene) and opens the asking app's page from the ask notification.
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(_ app: UIApplication,
                      didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
@@ -115,7 +131,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     func userNotificationCenter(_ c: UNUserNotificationCenter, didReceive r: UNNotificationResponse) async {
-        await MainActor.run { Permissions.shared.showScreen = true }
+        let package = r.notification.request.content.userInfo["package"] as? String
+        await MainActor.run { Permissions.shared.open = package }
     }
 
     func userNotificationCenter(_ c: UNUserNotificationCenter,

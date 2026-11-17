@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0747FEE0D73E850B42F007EA /* DevLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BE3FC0819E9791F8B4262D5 /* DevLog.swift */; };
 		0AD67CDEC9F904D2ADD95084 /* CatalogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 959119DD04DE62417C85273A /* CatalogView.swift */; };
 		1076436FDFC947C41B97C816 /* WireKit in Frameworks */ = {isa = PBXBuildFile; productRef = DCBA60A6C6635A5AAC71E3C7 /* WireKit */; };
 		1371CC20EE343343ABD1DA2E /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F4B726EFA119F8A08A0ACE8 /* Keychain.swift */; };
@@ -21,6 +22,7 @@
 		6D7388A2D57938D53D35A746 /* FaceLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E717189BB9272DA6A41F8F /* FaceLinkTests.swift */; };
 		84A9930F50E50DA86B3CBEFD /* Account.swift in Sources */ = {isa = PBXBuildFile; fileRef = 661DDBFDDEE1A3553A8E5010 /* Account.swift */; };
 		876ED2DDDC5F80ABC8F6DD5D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DBEA972FC799568E96B70EE6 /* Assets.xcassets */; };
+		CEE94ED61DE7141BB77FC827 /* Apps.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71CB9B7025162812B720746B /* Apps.swift */; };
 		D6D3564BAC7E915C04695771 /* stock-dials.json in Resources */ = {isa = PBXBuildFile; fileRef = 49774F9C3C84BAA91D96604A /* stock-dials.json */; };
 		EED6A58529E6B025F772E522 /* WakeProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 835AD9304F35D07A99527346 /* WakeProbe.swift */; };
 		FF739CBC1BF6E89E4B6C94AE /* Style.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9011709E9E31B2E83D046922 /* Style.swift */; };
@@ -43,6 +45,8 @@
 		49774F9C3C84BAA91D96604A /* stock-dials.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "stock-dials.json"; sourceTree = "<group>"; };
 		5F5480D24AD98E796060A456 /* Catalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Catalog.swift; sourceTree = "<group>"; };
 		661DDBFDDEE1A3553A8E5010 /* Account.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Account.swift; sourceTree = "<group>"; };
+		6BE3FC0819E9791F8B4262D5 /* DevLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevLog.swift; sourceTree = "<group>"; };
+		71CB9B7025162812B720746B /* Apps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Apps.swift; sourceTree = "<group>"; };
 		728879F0C797B91B298D9709 /* FaceInstall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceInstall.swift; sourceTree = "<group>"; };
 		79E717189BB9272DA6A41F8F /* FaceLinkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceLinkTests.swift; sourceTree = "<group>"; };
 		835AD9304F35D07A99527346 /* WakeProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeProbe.swift; sourceTree = "<group>"; };
@@ -85,11 +89,13 @@
 			isa = PBXGroup;
 			children = (
 				661DDBFDDEE1A3553A8E5010 /* Account.swift */,
+				71CB9B7025162812B720746B /* Apps.swift */,
 				DBEA972FC799568E96B70EE6 /* Assets.xcassets */,
 				F7CE9B33B6B174A1EF287F66 /* BLELink.swift */,
 				5F5480D24AD98E796060A456 /* Catalog.swift */,
 				959119DD04DE62417C85273A /* CatalogView.swift */,
 				B1AFECBF78F1324F6CD84462 /* ContentView.swift */,
+				6BE3FC0819E9791F8B4262D5 /* DevLog.swift */,
 				728879F0C797B91B298D9709 /* FaceInstall.swift */,
 				3D306508B22A1C6013C76A19 /* FMCCompanion.entitlements */,
 				A61DF9313CB0EEB556139708 /* Info.plist */,
@@ -232,10 +238,12 @@
 			buildActionMask = 2147483647;
 			files = (
 				84A9930F50E50DA86B3CBEFD /* Account.swift in Sources */,
+				CEE94ED61DE7141BB77FC827 /* Apps.swift in Sources */,
 				16962170E187B80936244AFE /* BLELink.swift in Sources */,
 				29A5F0695D20CD62976866A7 /* Catalog.swift in Sources */,
 				0AD67CDEC9F904D2ADD95084 /* CatalogView.swift in Sources */,
 				4362579C1277D88E3644D3B5 /* ContentView.swift in Sources */,
+				0747FEE0D73E850B42F007EA /* DevLog.swift in Sources */,
 				2B0F21FD8581E221CA8AE3B6 /* FaceInstall.swift in Sources */,
 				1371CC20EE343343ABD1DA2E /* Keychain.swift in Sources */,
 				3B5D6A2DE0ED5040C869738E /* Permissions.swift in Sources */,

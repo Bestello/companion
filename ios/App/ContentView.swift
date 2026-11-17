@@ -22,7 +22,7 @@ struct FMCCompanionApp: App {
                     .tag(1)
             }
             .onOpenURL(perform: open)
-            .onChange(of: Permissions.shared.showScreen) { if $1 { tab = 1 } }
+            .onChange(of: Permissions.shared.open) { if $1 != nil { tab = 1 } }
             .environment(account)
             .environment(watch)
             .environment(catalog)
@@ -54,6 +54,8 @@ struct ContentView: View {
     @Environment(WatchModel.self) private var watch
     // DEBUG screenshots: `-signin` opens Sign in
     @State private var signingIn = CommandLine.arguments.contains("-signin")
+    // DEBUG screenshots: `-apps` opens Apps, `-app <name>` that app's page
+    @State private var showingApps = CommandLine.arguments.contains("-apps")
 
     var body: some View {
         @Bindable var perms = Permissions.shared
@@ -67,17 +69,30 @@ struct ContentView: View {
                 if let state = watch.loader {
                     LoaderSection(state: state)
                 }
-                FacesOnWatchSection()
-                Section("Settings") {
+                Section {
                     NavigationLink {
-                        PermissionsView()
+                        AppsView()
                     } label: {
-                        Label("Permissions", systemImage: "lock.shield")
-                            .badge(Permissions.shared.pending.count)
+                        HStack(spacing: 12) {
+                            SettingsIcon(symbol: "square.grid.2x2.fill", color: .indigo)
+                            Text("Apps")
+                            Spacer()
+                            CountBadge(count: Permissions.shared.pending.count)
+                        }
                     }
-                    #if DEBUG
-                    NavigationLink("Wake probe") { WakeProbeView() }
-                    #endif
+                } footer: {
+                    Text("What each watch app may use on your phone.")
+                }
+                FacesOnWatchSection()
+                Section {
+                    NavigationLink {
+                        DeveloperView()
+                    } label: {
+                        HStack(spacing: 12) {
+                            SettingsIcon(symbol: "hammer.fill", color: .gray)
+                            Text("Developer")
+                        }
+                    }
                 }
                 Section("FMC account") {
                     if let user = account.user {
@@ -105,7 +120,15 @@ struct ContentView: View {
             }
             .navigationTitle("FMC Companion")
             .navigationDestination(isPresented: $signingIn) { SignInView() }
-            .navigationDestination(isPresented: $perms.showScreen) { PermissionsView() }
+            .navigationDestination(item: $perms.open) { AppView(name: $0) }
+            .navigationDestination(isPresented: $showingApps) { AppsView() }
+            #if DEBUG
+            .task {
+                let a = CommandLine.arguments
+                if let i = a.firstIndex(of: "-app"), i + 1 < a.count { perms.open = a[i + 1] }
+            }
+            #endif
+            .navigationDestination(for: String.self) { AppView(name: $0) }
         }
     }
 }
@@ -258,23 +281,6 @@ struct LoaderSection: View {
                 Metric(value: state.loader.map { "\($0.version)" } ?? "—", unit: "Loader")
             }
             .padding(.vertical, 4)
-        }
-        Section("Apps on the watch") {
-            if state.apps.isEmpty {
-                Text("No apps installed").foregroundStyle(.secondary)
-            }
-            ForEach(state.apps.keys.sorted(), id: \.self) { slot in
-                let app = state.apps[slot]!
-                // workout-companion's DayRow: the slot in a filled badge, the name and what it is
-                HStack(spacing: 14) {
-                    Badge { Text("\(slot)").font(.system(.title3, design: .rounded, weight: .bold)) }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(app.name).font(.body.weight(.semibold))
-                        Text("Version \(app.version) · slot \(slot)").font(.subheadline).foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.vertical, 2)
-            }
         }
     }
 }
