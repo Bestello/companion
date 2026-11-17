@@ -90,13 +90,13 @@ struct CountBadge: View {
     }
 }
 
-/// A watch app's tile: its store icon, or its first letter on the accent, as a home-screen icon.
+/// A watch app's icon: round, as on the watch. Its store icon, or its first letter on grey.
 struct AppIcon: View {
     let name: String
     var side: CGFloat = 29
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: side * 0.225, style: .continuous)
+        let shape = Circle()
         Group {
             if let url = StoreApps.shared.listing(name)?.icon {
                 AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { letter }
@@ -112,9 +112,9 @@ struct AppIcon: View {
     private var letter: some View {
         Text(name.prefix(1).uppercased())
             .font(.system(size: side * 0.5, weight: .bold, design: .rounded))
-            .foregroundStyle(Color.fmcOnAccent)
+            .foregroundStyle(.white)
             .frame(width: side, height: side)
-            .background(Color.fmcAccent.gradient)
+            .background(Color(.systemGray2).gradient)
     }
 }
 
@@ -150,7 +150,7 @@ struct AppsView: View {
     }
 
     private func row(_ app: WatchApp) -> some View {
-        NavigationLink(value: app.name) {
+        NavigationLink(value: ContentView.Route.app(app.name)) {
             HStack(spacing: 12) {
                 AppIcon(name: app.name)
                 VStack(alignment: .leading, spacing: 1) {

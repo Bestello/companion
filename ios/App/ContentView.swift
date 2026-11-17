@@ -52,14 +52,23 @@ extension FMCCompanionApp {
 struct ContentView: View {
     @Environment(Account.self) private var account
     @Environment(WatchModel.self) private var watch
-    // DEBUG screenshots: `-signin` opens Sign in
-    @State private var signingIn = CommandLine.arguments.contains("-signin")
-    // DEBUG screenshots: `-apps` opens Apps, `-app <name>` that app's page
-    @State private var showingApps = CommandLine.arguments.contains("-apps")
+    /// One path for every page the Watch tab pushes: links by value only, mixed link styles push twice.
+    @State private var path: [Route] = Self.launchPath
+
+    enum Route: Hashable { case apps, app(String), developer, wakeProbe, signIn }
+
+    // DEBUG screenshots: `-apps` opens Apps, `-app <name>` that app's page, `-signin` Sign in
+    private static var launchPath: [Route] {
+        let a = CommandLine.arguments
+        if let i = a.firstIndex(of: "-app"), i + 1 < a.count { return [.apps, .app(a[i + 1])] }
+        if a.contains("-apps") { return [.apps] }
+        if a.contains("-signin") { return [.signIn] }
+        return []
+    }
 
     var body: some View {
         @Bindable var perms = Permissions.shared
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 Section {
                     WatchStatus()
@@ -70,9 +79,7 @@ struct ContentView: View {
                     LoaderSection(state: state)
                 }
                 Section {
-                    NavigationLink {
-                        AppsView()
-                    } label: {
+                    NavigationLink(value: Route.apps) {
                         HStack(spacing: 12) {
                             SettingsIcon(symbol: "square.grid.2x2.fill", color: .indigo)
                             Text("Apps")
@@ -85,9 +92,7 @@ struct ContentView: View {
                 }
                 FacesOnWatchSection()
                 Section {
-                    NavigationLink {
-                        DeveloperView()
-                    } label: {
+                    NavigationLink(value: Route.developer) {
                         HStack(spacing: 12) {
                             SettingsIcon(symbol: "hammer.fill", color: .gray)
                             Text("Developer")
@@ -107,7 +112,7 @@ struct ContentView: View {
                         Button("Sign out") { account.signOut() }
                         DeleteAccountButton()
                     } else {
-                        Button { signingIn = true } label: {
+                        Button { path.append(.signIn) } label: {
                             LabeledContent {
                                 Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
                             } label: {
@@ -119,16 +124,26 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("FMC Companion")
-            .navigationDestination(isPresented: $signingIn) { SignInView() }
-            .navigationDestination(item: $perms.open) { AppView(name: $0) }
-            .navigationDestination(isPresented: $showingApps) { AppsView() }
-            #if DEBUG
-            .task {
-                let a = CommandLine.arguments
-                if let i = a.firstIndex(of: "-app"), i + 1 < a.count { perms.open = a[i + 1] }
+            .navigationDestination(for: Route.self) { route in
+                switch route {
+                case .apps: AppsView()
+                case .app(let name): AppView(name: name)
+                case .developer: DeveloperView()
+                case .wakeProbe:
+                    #if DEBUG
+                    WakeProbeView()
+                    #else
+                    EmptyView()
+                    #endif
+                case .signIn: SignInView()
+                }
             }
-            #endif
-            .navigationDestination(for: String.self) { AppView(name: $0) }
+            // the ask notification: that app's page, over Apps
+            .onChange(of: perms.open) { _, name in
+                guard let name else { return }
+                path = [.apps, .app(name)]
+                perms.open = nil
+            }
         }
     }
 }
@@ -255,9 +270,12 @@ struct FacesOnWatchSection: View {
             try await FaceInstall.read()
             error = nil
             load()
+            DevLog.shared.log("faces: \(faces.count) read, header \(header.isEmpty ? "none" : header)")
         } catch UploadError.authFailed {
             // no saved key: the first install from the app binds, the list comes after that
+            DevLog.shared.log("faces: no saved stock key (install a face from the app once)")
         } catch {
+            DevLog.shared.log("faces: \(error.localizedDescription)")
             self.error = String(localized: "Couldn't read the faces on the watch: \(error.localizedDescription)")
         }
     }

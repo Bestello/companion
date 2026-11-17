@@ -51,7 +51,7 @@ struct DeveloperView: View {
         List {
             #if DEBUG
             Section {
-                NavigationLink("Wake probe") { WakeProbeView() }
+                NavigationLink("Wake probe", value: ContentView.Route.wakeProbe)
             }
             #endif
             Section {
@@ -59,10 +59,10 @@ struct DeveloperView: View {
                     Text(line).font(.caption.monospaced()).textSelection(.enabled)
                 }
                 if log.lines.isEmpty {
-                    Text("Nothing yet. Requests from watch apps show up here.").foregroundStyle(.secondary)
+                    Text("Nothing yet. Requests from watch apps and reading the faces show up here.").foregroundStyle(.secondary)
                 }
             } header: {
-                Text("RPC log")
+                Text("Log")
             } footer: {
                 Text("BG: the app was in the background when it happened.")
             }
