@@ -11,6 +11,7 @@ struct FMCCompanionApp: App {
             ContentView()
                 .environment(account)
                 .environment(watch)
+                .tint(.fmcAccent)
                 .task { await account.restore() }
                 #if DEBUG
                 // Screenshots: `-demo YES -check` reads the sample watch on launch
@@ -29,25 +30,42 @@ struct ContentView: View {
     var body: some View {
         @Bindable var watch = watch
         NavigationStack {
-            Form {
-                Section("Watch") {
+            List {
+                Section {
                     WatchStatus()
+                } footer: {
+                    Text(watch.demo ? "Demo mode: a sample watch with the App Loader and two apps."
+                                    : "Keep the watch connected in Nothing X. The app only reads from it.")
                 }
                 if let state = watch.loader {
                     LoaderSection(state: state)
                 }
-                Section {
-                    Toggle("Demo mode", isOn: $watch.demo)
-                } footer: {
-                    Text("Shows a sample watch, for trying the app without one.")
+                Section("Settings") {
+                    Toggle(isOn: $watch.demo) {
+                        Label("Demo mode", systemImage: "sparkles")
+                    }
                 }
                 Section("FMC account") {
                     if let user = account.user {
-                        LabeledContent(user.name.isEmpty ? "Signed in" : user.name, value: user.email)
+                        HStack(spacing: 14) {
+                            Badge { Image(systemName: "person.fill").font(.title3) }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(user.name.isEmpty ? "Signed in" : user.name).font(.body.weight(.semibold))
+                                Text(user.email).font(.subheadline).foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
                         Button("Sign out") { account.signOut() }
                         DeleteAccountButton()
                     } else {
-                        Button("Sign in") { signingIn = true }
+                        Button { signingIn = true } label: {
+                            LabeledContent {
+                                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                            } label: {
+                                Label("Sign in", systemImage: "person.crop.circle")
+                            }
+                        }
+                        .tint(.primary)
                     }
                 }
             }
@@ -57,30 +75,61 @@ struct ContentView: View {
     }
 }
 
+/// The watch tile from workout-companion's WatchView, with Zeron's capsule button under it.
 struct WatchStatus: View {
     @Environment(WatchModel.self) private var watch
 
     var body: some View {
-        switch watch.phase {
-        case .idle:
-            Text(watch.demo ? "Sample watch" : "Keep the watch connected in Nothing X.")
-                .foregroundStyle(.secondary)
-        case .checking:
-            HStack {
-                ProgressView()
-                Text("Reading the watch…")
+        VStack(spacing: 16) {
+            HStack(spacing: 16) {
+                Badge(side: 64, filled: connected) {
+                    Image(systemName: "applewatch").font(.system(size: 30, weight: .medium))
+                        .symbolEffect(.pulse, isActive: watch.phase == .checking)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.title3.bold())
+                    Text(detail).font(.subheadline).foregroundStyle(detailColor)
+                }
+                Spacer(minLength: 0)
             }
-        case .checked:
-            Label("Connected", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-        case .failed(let message):
-            Label(message, systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+            Button {
+                Task { await watch.check() }
+            } label: {
+                Label(watch.phase == .idle ? "Connect" : "Check again",
+                      systemImage: watch.phase == .idle ? "dot.radiowaves.left.and.right" : "arrow.clockwise")
+            }
+            .buttonStyle(.primary)
+            .disabled(watch.phase == .checking)
         }
-        Button(watch.phase == .idle ? "Connect" : "Check again") {
-            Task { await watch.check() }
+        .padding(.vertical, 6)
+    }
+
+    private var connected: Bool { if case .checked = watch.phase { true } else { false } }
+
+    private var title: LocalizedStringKey {
+        switch watch.phase {
+        case .idle: watch.demo ? "Sample watch" : "Not connected"
+        case .checking: "Reading the watch…"
+        case .checked: "Connected"
+        case .failed: "Couldn't connect"
         }
-        .disabled(watch.phase == .checking)
+    }
+
+    private var detail: String {
+        switch watch.phase {
+        case .idle: String(localized: "Tap Connect to read it")
+        case .checking: String(localized: "This takes a few seconds")
+        case .checked(let state): state == nil ? String(localized: "Ready for watch faces") : String(localized: "App Loader found")
+        case .failed(let message): message
+        }
+    }
+
+    private var detailColor: Color {
+        switch watch.phase {
+        case .checked: .fmcSuccess
+        case .failed: .fmcWarning
+        default: .secondary
+        }
     }
 }
 
@@ -89,8 +138,11 @@ struct LoaderSection: View {
 
     var body: some View {
         Section("App Loader") {
-            LabeledContent("Stub", value: "\(state.stub.version)")
-            LabeledContent("Loader", value: state.loader.map { "\($0.version)" } ?? "not installed")
+            HStack {
+                Metric(value: "\(state.stub.version)", unit: "Stub")
+                Metric(value: state.loader.map { "\($0.version)" } ?? "—", unit: "Loader")
+            }
+            .padding(.vertical, 4)
         }
         Section("Apps on the watch") {
             if state.apps.isEmpty {
@@ -98,12 +150,22 @@ struct LoaderSection: View {
             }
             ForEach(state.apps.keys.sorted(), id: \.self) { slot in
                 let app = state.apps[slot]!
-                LabeledContent(app.name, value: "v\(app.version) · slot \(slot)")
+                // workout-companion's DayRow: the slot in a filled badge, the name and what it is
+                HStack(spacing: 14) {
+                    Badge { Text("\(slot)").font(.system(.title3, design: .rounded, weight: .bold)) }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(app.name).font(.body.weight(.semibold))
+                        Text("Version \(app.version) · slot \(slot)").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 2)
             }
         }
     }
 }
 
+/// Zeron's welcome page (mark, title, tagline, capsule buttons) around a grouped section for the fields.
+/// A List, not a ScrollView: a TextField in a ScrollView loops layout on iOS 27.
 struct SignInView: View {
     @Environment(Account.self) private var account
     @Environment(\.dismiss) private var dismiss
@@ -113,7 +175,19 @@ struct SignInView: View {
     @State private var busy = false
 
     var body: some View {
-        Form {
+        List {
+            Section {
+                VStack(spacing: 12) {
+                    Badge(side: 64) { Image(systemName: "applewatch").font(.system(size: 30, weight: .medium)) }
+                        .padding(.bottom, 14)
+                    Text("Sign in to FMC").font(.title.weight(.semibold))
+                    Text("Your fmc.tools account, for watch faces on your watch.")
+                        .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .plainRow()
+            }
             Section {
                 TextField("Email", text: $email)
                     .textContentType(.username)
@@ -123,36 +197,48 @@ struct SignInView: View {
                 SecureField("Password", text: $password)
                     .textContentType(.password)
             } footer: {
-                if let error { Text(error).foregroundStyle(.red) }
+                if let error {
+                    Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Color.fmcDanger)
+                }
             }
             Section {
-                Button {
-                    run { try await account.signIn(email: email.trimmingCharacters(in: .whitespaces), password: password) }
-                } label: {
-                    if busy { ProgressView() } else { Text("Sign in") }
-                }
-                .disabled(busy || email.isEmpty || password.isEmpty)
-            } footer: {
-                Link("No account? Sign up at fmc.tools", destination: Account.signUp)
-            }
-            if !account.providers.isEmpty {
-                Section {
-                    // Apple first, as 4.8 wants it offered alongside, and in Apple's black style (HIG).
-                    ForEach(account.providers.sorted { $0.name == "apple" && $1.name != "apple" }) { p in
-                        Button {
-                            run { try await account.signIn(with: p) }
-                        } label: {
-                            Label("Continue with \(p.displayName)", systemImage: p.name == "apple" ? "apple.logo" : "person.crop.circle")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .listRowBackground(p.name == "apple" ? Color.black : nil)
-                        .foregroundStyle(p.name == "apple" ? .white : .accentColor)
-                        .disabled(busy)
+                VStack(spacing: 12) {
+                    Button {
+                        run { try await account.signIn(email: email.trimmingCharacters(in: .whitespaces), password: password) }
+                    } label: {
+                        if busy { ProgressView().tint(Color(.systemBackground)) } else { Text("Sign in") }
                     }
+                    .buttonStyle(.primary)
+                    .disabled(busy || email.isEmpty || password.isEmpty)
+
+                    if !account.providers.isEmpty {
+                        HStack {
+                            VStack { Divider() }
+                            Text("or").font(.subheadline).foregroundStyle(.secondary)
+                            VStack { Divider() }
+                        }
+                        .padding(.vertical, 4)
+                        // Apple first, as 4.8 wants it offered alongside, and black/white as the HIG asks.
+                        ForEach(account.providers.sorted { $0.name == "apple" && $1.name != "apple" }) { p in
+                            let apple = p.name == "apple"
+                            let button = Button {
+                                run { try await account.signIn(with: p) }
+                            } label: {
+                                Label("Continue with \(p.displayName)", systemImage: apple ? "apple.logo" : "g.circle.fill")
+                            }
+                            .disabled(busy)
+                            if apple { button.buttonStyle(.primary) } else { button.buttonStyle(.secondary) }
+                        }
+                    }
+
+                    Link("No account? Sign up at fmc.tools", destination: Account.signUp)
+                        .font(.subheadline)
+                        .padding(.top, 8)
                 }
+                .plainRow()
             }
         }
-        .navigationTitle("Sign in")
+        .navigationBarTitleDisplayMode(.inline)
         .task { await account.loadProviders() }
     }
 
@@ -192,5 +278,12 @@ struct DeleteAccountButton: View {
             } message: {
                 Text(error ?? "")
             }
+    }
+}
+
+private extension View {
+    /// A List row without the card behind it, for content that sits on the page.
+    func plainRow() -> some View {
+        listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
     }
 }
