@@ -75,11 +75,18 @@ final class StockWatch: Link, @unchecked Sendable {
     var parser = StockParser()
     var init2: Data?, received = Data(), init2Answer: UInt8 = 1, finish: [UInt8] = [1]
     var chunk = 300, finishes = 0
+    /// The bind popup: open after the first 0x8049 that follows 0x8047. `confirmPopup` taps it once.
+    var popup = 0, confirmPopup = false, binds = 0
+    /// Nothing X's frames under the old session key, answered with authFailed in the middle of an upload.
+    var nothingX = false
 
     func onNotify(_ handler: @escaping @Sendable (String, Data) -> Void) { self.handler = handler }
 
     func reply(_ cmd: UInt32, _ p: Data, key: Data? = nil) {
-        for f in stockFrames(cmd, p, key: key ?? self.key) { handler?(DataUuid.notify, f) }
+        // the watch answers on the pair the request came in on
+        let uuid = [StockCmd.wfInit1Rep, StockCmd.wfInit2Rep, StockCmd.wfChunkReq, StockCmd.wfFinishAck1]
+            .contains(cmd) ? DataUuid.notify : Uuid.cmdNotify
+        for f in stockFrames(cmd, p, key: key ?? self.key) { handler?(uuid, f) }
     }
 
     func askNext() {
@@ -97,26 +104,42 @@ final class StockWatch: Link, @unchecked Sendable {
     }
 
     func write(_ uuid: String, _ f: Data) async throws {
-        #expect(uuid == DataUuid.write)
         let cmd = UInt32(f.be16(at: 3)) << 16 | UInt32(f.be16(at: 9))
+        #expect(uuid == (StockCmd.data.contains(cmd) ? DataUuid.write : Uuid.cmdWrite), "\(String(cmd, radix: 16))")
         if cmd == StockCmd.wfChunkWrite {
             received += f.dropFirst(11).dropLast(4)
+            if nothingX { reply(StockCmd.authFailed, Data([1])) }
             if f.be16(at: 5) == f.be16(at: 7) { askNext() }
             return
         }
-        guard let (c, p) = try parser.feed(f, key: key) else { return }
+        // 0x8049 and 0x804B (and their replies) go under the authkey, the rest under the session key
+        let auth = [StockCmd.authName, StockCmd.authNonceReq].contains(cmd)
+        guard let (c, p) = try parser.feed(f, key: auth ? k1 : key) else { return }
         switch c {
         case StockCmd.authPairReq:
             let random2 = Data(repeating: 7, count: 16)
             k1 = Data(sha256(Data(p.prefix(16)), random2, secret).prefix(16))
             reply(StockCmd.authPairRep, random2 + sha256(random2, secret))
             key = k1
-        case StockCmd.authName: reply(StockCmd.authMac, Data([1]))
+            popup = 1
+            binds += 1
+        case StockCmd.authName:
+            if popup == 1 { popup = 2; return } // opens the popup, no answer
+            if popup == 2, confirmPopup {
+                confirmPopup = false
+                popup = 0
+                k1 = Data(count: 16)
+                reply(StockCmd.authMac, Data([1]), key: k1)
+                return
+            }
+            reply(StockCmd.authMac, Data([1]), key: k1)
         case StockCmd.authNonceReq:
             let nonce = Data(repeating: 9, count: 16)
-            reply(StockCmd.authNonceRep, nonce)
+            reply(StockCmd.authNonceRep, nonce, key: k1)
             key = sessionKey(nonce: nonce, k1: k1!)
-        case StockCmd.authConfirmReq: reply(StockCmd.authConfirmRep, Data([1]))
+        case StockCmd.authConfirmReq:
+            popup = 0
+            reply(StockCmd.authConfirmRep, Data([1]))
         case StockCmd.wfInit1Req: reply(StockCmd.wfInit1Rep, Data([1]))
         case StockCmd.wfInit2Req:
             init2 = p
@@ -195,4 +218,32 @@ func testFace(_ n: Int = 1000) -> Data {
     var p = Data([1, 5, 6, 7])
     for id: UInt32 in [273, 0xFFFF_FFFF, 12345] { p.le(id) }
     #expect(parseInstalledDials(p) == [273, 12345])
+}
+
+@Test func confirmedPopupBindsAgain() async throws {
+    let w = StockWatch()
+    w.confirmPopup = true
+    let s = StockSession(link: w)
+    let k1 = try await s.pair(secret: w.secret)
+    #expect(w.binds == 2)
+    #expect(k1 == w.k1 && k1 != Data(count: 16))
+}
+
+@Test func storedKeyAuthenticatesWithoutPopup() async throws {
+    let w = StockWatch()
+    let k1 = try await StockSession(link: w).pair(secret: w.secret)
+    let s = StockSession(link: w)
+    try await s.authenticate(k1: k1)
+    #expect(w.binds == 1)
+    _ = try await installFace(s, testFace(), seed: "rec1", installed: [], capacity: 6) { _ in }
+}
+
+@Test func nothingXAuthFailedDoesNotStopUpload() async throws {
+    let w = StockWatch()
+    let s = StockSession(link: w)
+    _ = try await s.pair(secret: w.secret)
+    w.nothingX = true
+    let bin = testFace(2000)
+    _ = try await installFace(s, bin, seed: "rec1", installed: [], capacity: 6) { _ in }
+    #expect(w.received == bin)
 }

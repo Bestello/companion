@@ -6,7 +6,8 @@ import Foundation
 //
 // Not K: watchface commands are sealed with the stock session key, and pair/authenticate replace the authkey and
 // session key the watch keeps for Nothing X (cmf-watch-sdk docs/recon.md, "Bind popup, authkey and session key").
-// Whether that can share the link with Nothing X is open (FMC-8, item 2); nothing in the app calls this yet.
+// Two stock sessions can't share the link: Nothing X has to be closed first, as with Bluefy (FMC-8, item 2).
+// Channels as on the site: auth on fff2/fff1 (`send`), the upload on ffe1/ffe2 (`sendData`).
 
 public enum StockCmd {
     static func k(_ c2: UInt16) -> UInt32 { 0xFFFF_0000 | UInt32(c2) }
@@ -18,6 +19,10 @@ public enum StockCmd {
     public static let wfFinishAck2 = k(0x9065), wfInstalled = k(0xA055)
     /// Sent and read in the clear (body ‖ crc32le); `authFailed` because the watch could not decrypt.
     static let plain: Set<UInt32> = [authPairReq, authPairRep, wfChunkWrite, authFailed]
+    /// What goes over the data pair (ffe1); everything else goes over fff2.
+    static let data: Set<UInt32> = [wfInit1Req, wfInit2Req, wfChunkWrite, wfFinishAck2]
+    /// Not a command: a `0x0049` that opens only with the all-zero key (the bind popup was confirmed).
+    static let zeroKeyReply: UInt32 = 0
 }
 
 public let marker: UInt8 = 0xA5
@@ -73,7 +78,8 @@ public struct StockParser {
         var payload = Data()
         if len > 0 {
             if StockCmd.plain.contains(cmd) {
-                payload = Data(f.dropFirst(11))
+                // body ‖ crc32le
+                payload = Data(f.dropFirst(11).prefix(max(len - 4, 0)))
             } else {
                 let body = Data(f.dropFirst(11).prefix(len))
                 guard let key, body.count == len, let p = open(key, body) else { throw Failure.cannotOpen(cmd) }
@@ -129,9 +135,11 @@ public enum UploadError: Error, Equatable {
     case rejected(String)
     case stalled
     case authFailed
+    /// The bind popup was confirmed on the watch, which zeroed the new authkey: bind again without touching it.
+    case rebind
 }
 
-/// One stock session over the shared GATT link. Requests go to `DataUuid.write`, replies come on its notify.
+/// One stock session over the GATT link: auth on fff2 (replies on fff1), the upload on ffe1 (replies on ffe2).
 public actor StockSession {
     let link: Link
     let mtu: Int
@@ -144,58 +152,102 @@ public actor StockSession {
     public init(link: Link, mtu: Int = 180) {
         (self.link, self.mtu) = (link, mtu)
         let (stream, sink) = AsyncStream<Data>.makeStream()
-        link.onNotify { uuid, value in if uuid.uppercased() == DataUuid.notify { sink.yield(value) } }
+        link.onNotify { uuid, value in
+            // K frames on fff1 don't open with F5: the parser drops them
+            if [DataUuid.notify, Uuid.cmdNotify].contains(uuid.uppercased()) { sink.yield(value) }
+        }
         Task { [weak self] in
             for await f in stream { await self?.feed(f) }
         }
     }
 
     func feed(_ f: Data) async {
-        guard let (cmd, p) = try? parser.feed(f, key: key) else { return }
+        let got: (cmd: UInt32, payload: Data)?
+        do {
+            got = try parser.feed(f, key: key)
+        } catch StockParser.Failure.cannotOpen(StockCmd.authMac) {
+            // recon.md, "Bind popup…": confirming the popup zeroes the authkey and the reply comes under zero
+            var zero = StockParser()
+            if (try? zero.feed(f, key: Data(count: 16))) != nil { await inbox.put((StockCmd.zeroKeyReply, Data())) }
+            return
+        } catch { return }
+        guard let (cmd, p) = got else { return }
         if cmd == StockCmd.wfInstalled { reported = parseInstalledDials(p) }
         await inbox.put((cmd, p))
     }
 
     func send(_ cmd: UInt32, _ payload: Data) async throws {
-        for f in stockFrames(cmd, payload, key: key, mtu: mtu) { try await link.write(DataUuid.write, f) }
+        let uuid = StockCmd.data.contains(cmd) ? DataUuid.write : Uuid.cmdWrite
+        for f in stockFrames(cmd, payload, key: key, mtu: mtu) { try await link.write(uuid, f) }
     }
 
-    /// The next command out of `wanted`; `authFailed` always ends the wait.
-    func next(_ wanted: Set<UInt32>, timeout: Duration = .seconds(8)) async throws -> (UInt32, Data) {
+    /// The next command out of `wanted`. `authFailed` ends the wait only during auth: on the shared link it also
+    /// answers Nothing X's frames under the key we replaced, which must not cut an upload short.
+    func next(_ wanted: Set<UInt32>, timeout: Duration = .seconds(8), auth: Bool = false) async throws
+        -> (UInt32, Data) {
         let deadline = ContinuousClock.now + timeout
         while true {
             let left = deadline - ContinuousClock.now
             guard left > .zero, let m = await inbox.next(timeout: left) else {
                 throw WireError.timeout("no " + wanted.map { String(format: "%04X", $0 & 0xFFFF) }.joined(separator: "/"))
             }
-            if m.0 == StockCmd.authFailed { throw UploadError.authFailed }
+            if auth, m.0 == StockCmd.authFailed { throw UploadError.authFailed }
+            if auth, m.0 == StockCmd.zeroKeyReply { throw UploadError.rebind }
             if wanted.contains(m.0) { return m }
         }
     }
 
-    /// A new bind: the watch shows its "Paired" popup, and the authkey Nothing X knows is replaced.
-    public func pair(secret: Data) async throws -> Data {
-        key = nil
-        let random1 = Data((0..<16).map { _ in UInt8.random(in: 0...255) })
-        try await send(StockCmd.authPairReq, pairRequest(random1: random1, secret: secret))
-        let (_, reply) = try await next([StockCmd.authPairRep])
-        guard let k1 = pairKey(random1: random1, reply: reply, secret: secret) else {
-            throw UploadError.rejected("watch signature mismatch")
+    /// A new bind: the watch shows its "Paired" popup, and the authkey Nothing X knows is replaced. As the SDK's
+    /// host (`link.py` `_bind`): the first `0x8049` only opens the popup, the second is answered; a confirmed popup
+    /// zeroes the authkey, so that attempt starts over.
+    public func pair(secret: Data, attempts: Int = 3) async throws -> Data {
+        for attempt in 1...attempts {
+            key = nil
+            await inbox.drain()
+            let random1 = Data((0..<16).map { _ in UInt8.random(in: 0...255) })
+            try await send(StockCmd.authPairReq, pairRequest(random1: random1, secret: secret))
+            let (_, reply) = try await next([StockCmd.authPairRep], auth: true)
+            guard let k1 = pairKey(random1: random1, reply: reply, secret: secret) else {
+                throw UploadError.rejected("watch signature mismatch")
+            }
+            key = k1
+            try await send(StockCmd.authName, Self.phone)
+            do {
+                do {
+                    try await name(timeout: .seconds(2))
+                } catch WireError.timeout {
+                    try await name(timeout: .seconds(8))
+                }
+                try await openSession(k1: k1)
+                return k1
+            } catch UploadError.rebind where attempt < attempts {
+                continue
+            }
         }
-        try await authenticate(k1: k1)
-        return k1
+        throw UploadError.rebind
+    }
+
+    static let phone = Data([marker]) + Data("fmc".utf8)
+
+    private func name(timeout: Duration) async throws {
+        try await send(StockCmd.authName, Self.phone)
+        _ = try await next([StockCmd.authMac], timeout: timeout, auth: true)
     }
 
     /// Opens a session with a known authkey: replaces the session key the watch keeps (and saves to NVRAM).
     public func authenticate(k1: Data) async throws {
         key = k1
-        try await send(StockCmd.authName, Data([marker]) + Data("fmc".utf8))
-        _ = try await next([StockCmd.authMac])
+        await inbox.drain()
+        try await name(timeout: .seconds(8))
+        try await openSession(k1: k1)
+    }
+
+    private func openSession(k1: Data) async throws {
         try await send(StockCmd.authNonceReq, Data([marker]))
-        let (_, nonce) = try await next([StockCmd.authNonceRep])
+        let (_, nonce) = try await next([StockCmd.authNonceRep], auth: true)
         key = sessionKey(nonce: nonce, k1: k1)
         try await send(StockCmd.authConfirmReq, Data([marker]))
-        _ = try await next([StockCmd.authConfirmRep])
+        _ = try await next([StockCmd.authConfirmRep], auth: true)
     }
 
     /// One upload attempt: init1, init2, then the watch pulls ranges until it says yes or no.
