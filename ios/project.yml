@@ -19,6 +19,7 @@ targets:
       properties:
         CFBundleDisplayName: FMC Companion
         UILaunchScreen: {}
+        UIBackgroundModes: [bluetooth-central]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSBluetoothAlwaysUsageDescription: FMC Companion connects to your watch to install watch faces and to read which apps are on it.
         ITSAppUsesNonExemptEncryption: false

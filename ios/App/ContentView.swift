@@ -71,6 +71,9 @@ struct ContentView: View {
                     Toggle(isOn: $watch.demo) {
                         Label("Demo mode", systemImage: "sparkles")
                     }
+                    #if DEBUG
+                    NavigationLink("Wake probe") { WakeProbeView() }
+                    #endif
                 }
                 Section("FMC account") {
                     if let user = account.user {

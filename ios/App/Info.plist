@@ -35,6 +35,10 @@
 	<false/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>FMC Companion connects to your watch to install watch faces and to read which apps are on it.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
