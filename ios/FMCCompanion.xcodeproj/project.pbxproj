@@ -13,11 +13,13 @@
 		4362579C1277D88E3644D3B5 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AFECBF78F1324F6CD84462 /* ContentView.swift */; };
 		5E95CBA89634EBA843284AE0 /* WatchModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3BB6347F0B47FDA2BACB52 /* WatchModel.swift */; };
 		84A9930F50E50DA86B3CBEFD /* Account.swift in Sources */ = {isa = PBXBuildFile; fileRef = 661DDBFDDEE1A3553A8E5010 /* Account.swift */; };
+		FF739CBC1BF6E89E4B6C94AE /* Style.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9011709E9E31B2E83D046922 /* Style.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		2F4B726EFA119F8A08A0ACE8 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
 		661DDBFDDEE1A3553A8E5010 /* Account.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Account.swift; sourceTree = "<group>"; };
+		9011709E9E31B2E83D046922 /* Style.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Style.swift; sourceTree = "<group>"; };
 		A61DF9313CB0EEB556139708 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		B1AFECBF78F1324F6CD84462 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		DE16AEA354DD402560E64E35 /* FMCCompanion.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = FMCCompanion.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -54,6 +56,7 @@
 				B1AFECBF78F1324F6CD84462 /* ContentView.swift */,
 				A61DF9313CB0EEB556139708 /* Info.plist */,
 				2F4B726EFA119F8A08A0ACE8 /* Keychain.swift */,
+				9011709E9E31B2E83D046922 /* Style.swift */,
 				EF3BB6347F0B47FDA2BACB52 /* WatchModel.swift */,
 			);
 			path = App;
@@ -140,6 +143,7 @@
 				16962170E187B80936244AFE /* BLELink.swift in Sources */,
 				4362579C1277D88E3644D3B5 /* ContentView.swift in Sources */,
 				1371CC20EE343343ABD1DA2E /* Keychain.swift in Sources */,
+				FF739CBC1BF6E89E4B6C94AE /* Style.swift in Sources */,
 				5E95CBA89634EBA843284AE0 /* WatchModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
