@@ -101,20 +101,22 @@ class Nav {
     /** A watch app's page, over Apps or straight from its ask notification. */
     var app by mutableStateOf<String?>(null)
     var developer by mutableStateOf(false)
+    var firmware by mutableStateOf(false)
 
     /** Back to the tab's root. */
-    fun root() { face = null; signingIn = false; apps = false; app = null; developer = false }
+    fun root() { face = null; signingIn = false; apps = false; app = null; developer = false; firmware = false }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun App(model: AppModel, nav: Nav) {
-    BackHandler(nav.face != null || nav.signingIn || nav.apps || nav.app != null || nav.developer) {
+    BackHandler(nav.face != null || nav.signingIn || nav.apps || nav.app != null || nav.developer || nav.firmware) {
         when {
             nav.signingIn -> nav.signingIn = false
             nav.app != null -> nav.app = null
             nav.apps -> nav.apps = false
             nav.developer -> nav.developer = false
+            nav.firmware -> nav.firmware = false
             else -> nav.face = null
         }
     }
@@ -135,6 +137,7 @@ fun App(model: AppModel, nav: Nav) {
                 nav.app != null -> AppScreen(model, nav.app!!) { nav.app = null }
                 nav.apps -> AppsScreen(model, { nav.app = it }) { nav.apps = false }
                 nav.developer -> DeveloperScreen { nav.developer = false }
+                nav.firmware -> FirmwareScreen(model) { nav.firmware = false }
                 nav.face != null -> FaceScreen(model, nav.face!!) { nav.face = null }
                 nav.tab == 0 -> CatalogScreen(model) { nav.face = it }
                 else -> WatchScreen(model, nav) { nav.signingIn = true }
@@ -396,13 +399,12 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
                     WatchStatus(model) { check() }
                 }
             }
-            model.loader?.let { state ->
-                item {
-                    Section("App Loader") {
-                        Row {
-                            Metric("${state.stub.version}", "Stub", Modifier.weight(1f))
-                            Metric(state.loader?.version?.toString() ?: "—", "Loader", Modifier.weight(1f))
-                        }
+            item {
+                // updates are checked right after each connect: the Firmware row shows them
+                LaunchedEffect(model.phase) { if (model.phase is Phase.Checked) FirmwareModel.refresh() }
+                Section {
+                    NavRow("Firmware", count = FirmwareModel.updates(model.loader), onClick = { nav.firmware = true }) {
+                        IconTile(painterResource(R.drawable.ic_memory), Color(0xFF757575))
                     }
                 }
             }

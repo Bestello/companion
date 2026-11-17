@@ -15,5 +15,7 @@ object Vectors {
     val pkg get() = k.getJSONObject("package")
     /** INFO's reply for a slot holding the vector package, without the status byte. */
     val header: ByteArray get() = hex(pkg.getString("info_reply_hex")).let { it.copyOfRange(1, it.size) }
-    val pkgHeader get() = PackageHeader(pkg.getInt("kind"), pkg.getString("name"), pkg.getLong("version"))
+    /** crc: crc32 of what follows the header, as package.pack writes it. */
+    val pkgHeader get() = PackageHeader(pkg.getInt("kind"), pkg.getString("name"), pkg.getLong("version"),
+        hex(pkg.getString("hex")).let { crc32(it.copyOfRange(64, it.size)) })
 }
