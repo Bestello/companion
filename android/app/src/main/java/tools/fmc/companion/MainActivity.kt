@@ -15,6 +15,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (savedInstanceState == null) handle(intent)
+        if (model.services) RpcService.start(this)
         setContent { FmcTheme { App(model, nav) } }
     }
 
@@ -29,6 +30,11 @@ class MainActivity : ComponentActivity() {
             nav.tab = 0
             nav.signingIn = false
             nav.face = it
+        }
+        if (intent.getBooleanExtra("permissions", false)) {
+            nav.face = null
+            nav.signingIn = false
+            nav.permissions = true
         }
         // Screenshots and manual checks without a watch: adb shell am start -n … --ez demo true --ei tab 1 --ez check true
         if (BuildConfig.DEBUG) {

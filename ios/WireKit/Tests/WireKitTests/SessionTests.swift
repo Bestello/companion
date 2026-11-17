@@ -89,3 +89,11 @@ final class FakeStub: Link, @unchecked Sendable {
     _ = try await KSession.open(link: stub, register: false)
     #expect(stub.pings == 0, "a stock watch never answers PING")
 }
+
+@Test func recvFromKeepsTheSlot() async throws {
+    let stub = FakeStub()
+    let (s, _) = try await KSession.open(link: stub, secretHex: stub.secret)
+    stub.notify(Uuid.cmdNotify, frame(c2: Cmd.event, payload: Data([5, 3]) + Data("R1Q".utf8), key: stub.key))
+    let got = try await s.recvFrom(timeout: .seconds(2))
+    #expect(got.slot == 3 && got.data == Data("R1Q".utf8))
+}

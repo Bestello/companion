@@ -68,6 +68,9 @@ enum FaceInstall {
     @MainActor static func install(_ bin: Data, seed: String, name: String,
                                    pick: @MainActor ([DialSlot]) async -> UInt32?,
                                    progress: @escaping @Sendable (Int) -> Void) async throws {
+        // the stock session binds the watch: the RPC listener waits it out
+        RPCListener.shared.stop()
+        defer { RPCListener.shared.start() }
         let link = BLELink()
         defer { link.disconnect() }
         let watchdog = Task {

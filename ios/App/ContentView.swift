@@ -3,6 +3,7 @@ import WireKit
 
 @main
 struct FMCCompanionApp: App {
+    @UIApplicationDelegateAdaptor private var delegate: AppDelegate
     @State private var account = Account()
     @State private var watch = WatchModel()
     @State private var catalog = Catalog()
@@ -21,6 +22,7 @@ struct FMCCompanionApp: App {
                     .tag(1)
             }
             .onOpenURL(perform: open)
+            .onChange(of: Permissions.shared.showScreen) { if $1 { tab = 1 } }
             .environment(account)
             .environment(watch)
             .environment(catalog)
@@ -55,6 +57,7 @@ struct ContentView: View {
 
     var body: some View {
         @Bindable var watch = watch
+        @Bindable var perms = Permissions.shared
         NavigationStack {
             List {
                 Section {
@@ -71,6 +74,15 @@ struct ContentView: View {
                     Toggle(isOn: $watch.demo) {
                         Label("Demo mode", systemImage: "sparkles")
                     }
+                    NavigationLink {
+                        PermissionsView()
+                    } label: {
+                        Label("Permissions", systemImage: "lock.shield")
+                            .badge(Permissions.shared.pending.count)
+                    }
+                    #if DEBUG
+                    NavigationLink("Wake probe") { WakeProbeView() }
+                    #endif
                 }
                 Section("FMC account") {
                     if let user = account.user {
@@ -98,6 +110,7 @@ struct ContentView: View {
             }
             .navigationTitle("FMC Companion")
             .navigationDestination(isPresented: $signingIn) { SignInView() }
+            .navigationDestination(isPresented: $perms.showScreen) { PermissionsView() }
         }
     }
 }

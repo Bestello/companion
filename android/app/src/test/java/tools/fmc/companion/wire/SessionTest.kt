@@ -27,7 +27,8 @@ class FakeStub : Link {
     }
 
     /** An app message sent unsolicited (docs/abi-1.4.md). */
-    fun event(data: ByteArray, seq: Int = 0) = notify(Uuid.CMD_NOTIFY, frame(Cmd.EVENT, bytes(seq, 0) + data, key))
+    fun event(data: ByteArray, seq: Int = 0, slot: Int = 0) =
+        notify(Uuid.CMD_NOTIFY, frame(Cmd.EVENT, bytes(seq, slot) + data, key))
 
     override suspend fun write(uuid: String, data: ByteArray) {
         if (uuid == Uuid.SHELL_WRITE) {
@@ -68,6 +69,8 @@ class SessionTest {
         stub.notify(Uuid.CMD_NOTIFY, frame(Cmd.EVENT, bytes(0, 0, 1, 2, 3), ByteArray(16)))
         stub.event("w1R1234".toByteArray())
         assertContentEquals("w1R1234".toByteArray(), s.recv(2000))
+        stub.event("R1Q".toByteArray(), slot = 3)
+        assertEquals(3 to "R1Q", s.recvFrom(2000).let { it.first to String(it.second) })
         val pings = stub.pings
         assertEquals(WireError.Timeout("no message"), assertFailsWith<WireError.Timeout> { s.recv(300) })
         assertEquals(pings, stub.pings, "no polling unless asked")

@@ -1,0 +1,276 @@
+{
+ "requests": [
+  {
+   "hex": "5231510701",
+   "id": 7,
+   "method": 1,
+   "args": ""
+  },
+  {
+   "hex": "5231510810000205",
+   "id": 8,
+   "method": 16,
+   "args": "000205"
+  },
+  {
+   "hex": "523151094068747470733a2f2f6578616d706c652e636f6d2f613f623d31",
+   "id": 9,
+   "method": 64,
+   "args": "68747470733a2f2f6578616d706c652e636f6d2f613f623d31"
+  },
+  {
+   "hex": "5231500100",
+   "rpc": false
+  },
+  {
+   "hex": "5231510a",
+   "bad": true
+  }
+ ],
+ "utf8_cut": [
+  {
+   "text": "hello",
+   "max": 64,
+   "hex": "68656c6c6f"
+  },
+  {
+   "text": "Созвон с командой по релизу и обсуждение планов на квартал",
+   "max": 64,
+   "hex": "d0a1d0bed0b7d0b2d0bed0bd20d18120d0bad0bed0bcd0b0d0bdd0b4d0bed0b920d0bfd0be20d180d0b5d0bbd0b8d0b7d18320d0b820d0bed0b1d181d183d0b6"
+  },
+  {
+   "text": "ab€",
+   "max": 4,
+   "hex": "6162"
+  }
+ ],
+ "calendar": [
+  {
+   "in": {
+    "day": 0,
+    "start": 570,
+    "duration": 30,
+    "all_day": false,
+    "tentative": false,
+    "color": 63488,
+    "title": "Standup",
+    "show": true
+   },
+   "hex": "003a021e000000f85374616e647570"
+  },
+  {
+   "in": {
+    "day": 0,
+    "start": 570,
+    "duration": 30,
+    "all_day": false,
+    "tentative": false,
+    "color": 63488,
+    "title": "Standup",
+    "show": false
+   },
+   "hex": "003a021e000400f8"
+  },
+  {
+   "in": {
+    "day": 1,
+    "start": 0,
+    "duration": 1440,
+    "all_day": true,
+    "tentative": true,
+    "color": 2016,
+    "title": "Отпуск",
+    "show": true
+   },
+   "hex": "010000a00503e007d09ed182d0bfd183d181d0ba"
+  },
+  {
+   "in": {
+    "day": -1,
+    "start": 1380,
+    "duration": 120,
+    "all_day": false,
+    "tentative": false,
+    "color": 31,
+    "title": "Созвон с командой по релизу и обсуждение планов на квартал",
+    "show": true
+   },
+   "hex": "ff64057800001f00d0a1d0bed0b7d0b2d0bed0bd20d18120d0bad0bed0bcd0b0d0bdd0b4d0bed0b920d0bfd0be20d180d0b5d0bbd0b8d0b7d18320d0b820d0bed0b1d181d183d0b6"
+  }
+ ],
+ "calendar_dates": [
+  {
+   "tz": "Europe/Berlin",
+   "now": "2026-11-17T08:00",
+   "start": "2026-11-17T09:30",
+   "end": "2026-11-17T10:00",
+   "day": 0,
+   "start_min": 570,
+   "duration": 30
+  },
+  {
+   "tz": "Europe/Berlin",
+   "now": "2026-11-17T08:00",
+   "start": "2026-11-17T23:00",
+   "end": "2026-11-18T01:00",
+   "day": 0,
+   "start_min": 1380,
+   "duration": 120
+  },
+  {
+   "tz": "Europe/Berlin",
+   "now": "2026-03-29T00:10",
+   "start": "2026-03-29T01:30",
+   "end": "2026-03-29T03:30",
+   "day": 0,
+   "start_min": 90,
+   "duration": 60
+  },
+  {
+   "tz": "Europe/Moscow",
+   "now": "2026-11-17T23:50",
+   "start": "2026-11-19T07:00",
+   "end": "2026-11-19T07:45",
+   "day": 2,
+   "start_min": 420,
+   "duration": 45
+  }
+ ],
+ "location": [
+  {
+   "in": {
+    "lat": 55.7558,
+    "lon": 37.6173,
+    "age_min": 12,
+    "place": "Москва"
+   },
+   "hex": "2e0278010c00d09cd0bed181d0bad0b2d0b0"
+  },
+  {
+   "in": {
+    "lat": -33.8688,
+    "lon": 151.2093,
+    "age_min": 100000,
+    "place": ""
+   },
+   "hex": "adfee805ffff"
+  }
+ ],
+ "weather": [
+  {
+   "in": {
+    "kind": "now",
+    "temp": -3.4,
+    "code": 71,
+    "wind": 5,
+    "humidity": 88,
+    "age_min": 10
+   },
+   "hex": "00deff4705580a"
+  },
+  {
+   "in": {
+    "kind": "day",
+    "day": 1,
+    "min": -7,
+    "max": -1,
+    "code": 3,
+    "precip": 40
+   },
+   "hex": "0101f9ff0328"
+  }
+ ],
+ "http": [
+  {
+   "in": {
+    "code": 200,
+    "body": "7b2274223a32317d"
+   },
+   "records": [
+    "c8000800",
+    "7b2274223a32317d"
+   ]
+  },
+  {
+   "in": {
+    "code": 404,
+    "body": ""
+   },
+   "records": [
+    "94010000"
+   ]
+  },
+  {
+   "in": {
+    "code": 200,
+    "body": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9"
+   },
+   "records": [
+    "c800fa00",
+    "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778",
+    "797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1",
+    "f2f3f4f5f6f7f8f9"
+   ]
+  }
+ ],
+ "notifications": [
+  {
+   "in": {
+    "age_min": 3,
+    "app": "Telegram",
+    "text": "Аня: привет",
+    "show": true
+   },
+   "hex": "0300000854656c656772616dd090d0bdd18f3a20d0bfd180d0b8d0b2d0b5d182"
+  },
+  {
+   "in": {
+    "age_min": 3,
+    "app": "Telegram",
+    "text": "Аня: привет",
+    "show": false
+   },
+   "hex": "0300040854656c656772616d"
+  }
+ ],
+ "replies": [
+  {
+   "id": 7,
+   "status": 0,
+   "records": [],
+   "messages": [
+    "52314107000000"
+   ]
+  },
+  {
+   "id": 7,
+   "status": 4,
+   "records": [],
+   "messages": [
+    "52314107040000"
+   ]
+  },
+  {
+   "id": 8,
+   "status": 0,
+   "records": [
+    "003a021e000400f8"
+   ],
+   "messages": [
+    "52314108000001003a021e000400f8"
+   ]
+  },
+  {
+   "id": 9,
+   "status": 0,
+   "records": [
+    "c8000800",
+    "7b2274223a32317d"
+   ],
+   "messages": [
+    "52314109000002c8000800",
+    "523141090001027b2274223a32317d"
+   ]
+  }
+ ]
+}

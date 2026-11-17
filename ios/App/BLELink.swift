@@ -3,7 +3,8 @@ import WireKit
 
 // WireKit's Link over CoreBluetooth, on the link the phone already holds for Nothing X (cmf-watch-sdk
 // docs/abi-1.4.md, "Writing a host", steps 1–2). Everything runs on the main queue; one step waits at a time.
-// ponytail: foreground only. Background mode and state restoration come with the first feature that needs them.
+// Background: `bluetooth-central` keeps the link and wakes the app on a notify (WakeProbe checks that it does).
+// ponytail: no state restoration; a kill by the system ends the link until the next launch.
 
 enum BLEError: LocalizedError {
     case off, unauthorized, noWatch, missing, failed(String)
@@ -33,6 +34,8 @@ final class BLELink: NSObject, Link, @unchecked Sendable {
     private let lock = NSLock()
     private var step: CheckedContinuation<Void, Error>?
     private var pendingServices = 0
+    /// The link went down (DEBUG wake probe logs it).
+    var onDisconnect: (() -> Void)?
 
     /// The connected watch's identifier: keys the cached pairing secret.
     var watchID: UUID? { peripheral?.identifier }
@@ -138,6 +141,7 @@ extension BLELink: CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func centralManager(_ c: CBCentralManager, didDisconnectPeripheral p: CBPeripheral, error: Error?) {
         finish(BLEError.failed("The watch disconnected."))
+        onDisconnect?()
     }
 
     func peripheral(_ p: CBPeripheral, didDiscoverServices error: Error?) {
