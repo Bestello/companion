@@ -1,0 +1,6 @@
+<!-- A round watch with straps: the tab, the watch tile and the launcher mark. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FF000000"
+        android:pathData="M9,1h6l0.8,3.3A8,8 0,0 1,20 11v2a8,8 0,0 1,-4.2 6.7L15,23H9l-0.8,-3.3A8,8 0,0 1,4 13v-2a8,8 0,0 1,4.2 -6.7zM12,6a6,6 0,1 0,0 12a6,6 0,1 0,0 -12zM11.25,8.5h1.5v3.2l2.2,1.6 -0.9,1.2 -2.8,-2z" />
+</vector>
