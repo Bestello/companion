@@ -1,11 +1,12 @@
-# Miniapp services: manifest and RPC (draft)
+# Miniapp services: RPC (draft)
 
-A miniapp on the watch asks the phone for data the watch cannot reach (the phone's calendar first). The phone
-answers from a fixed set of services written natively in both apps. No code from the site runs on the phone: a
-miniapp only declares which services it uses, the user grants them at install, and the watch calls them over the
-existing app channel.
+A miniapp on the watch asks the phone for data the watch cannot reach: the phone's calendar, location, weather,
+notifications, a web request. The phone answers from a fixed set of services written natively in both apps. No code
+from the site runs on the phone. The first time an app calls a service, the phone asks the user; the answer is kept
+per app.
 
-Status: draft. Nothing here is implemented. Version 1 has two methods: `caps` and `calendar.events`.
+Status: draft, being implemented. Byte layouts are fixed by `ios/WireKit/Tests/WireKitTests/rpc-vectors.json`, which
+both apps test against (as `vectors.json`). A change to a vector is a change for both apps and the watch apps.
 
 ## Constraints this design follows
 
@@ -14,109 +15,113 @@ From cmf-watch-sdk (`docs/app-guide.md` §4, `docs/abi-1.4.md`):
 - App messages are 1–128 bytes each way; the watch app has an inbox and an outbox of 4 messages each.
 - Host → app goes to the running app only (`MSG`, slot `0xFF`); `NO_APP` otherwise. So the watch pulls: a closed
   miniapp gets nothing pushed.
-- App → host arrives as `EVENT` (`seq ‖ slot ‖ data`) without polling (loader of 2026-11-13+). `slot` tells the phone
-  which app asked.
+- App → host arrives as `EVENT`, plain `seq ‖ slot ‖ data` (loader of 2026-11-13+). `slot` tells the phone which app
+  asked.
 - `text` draws at most 64 bytes; glyphs cover ASCII and Cyrillic only.
 - The app has local wall-clock time (`time()`), so times go over the wire as local day + minute, no epoch or zones.
 - **Anyone in BLE range can read K and with it every app message.** The SDK says not to send personal data. See
-  "Personal data" below: calendar titles are personal data.
-- iOS: the companion runs in the background only while woken by BLE (`bluetooth-central`). Whether a notify on the
-  link Nothing X holds wakes it is **not verified on hardware**; check that before building on it.
+  "Personal data".
+- iOS: the companion runs in the background only while woken by BLE (`bluetooth-central`), about 10 s per wake.
+  Every method answers within 8 s. Whether a notify on the link Nothing X holds wakes the app at all is checked by the
+  DEBUG Wake probe (`ios/App/WakeProbe.swift`) and not yet verified on hardware.
 
-## Manifest
+## Who is asking
 
-Lives on the miniapp's record on fmc.tools (a JSON field next to the `.wp2app` file), read by the companion before
-install:
+The phone keeps the `slot` of each `EVENT` and maps it to the package name in that slot's `WP2A` header (`INFO`,
+as `readLoader` reads it; cached, read again for a slot it has not seen or after an install). Grants are keyed by the
+package name.
 
-```json
-{
-  "package": "calendar",
-  "version": 3,
-  "uses": [
-    { "cap": "calendar.read", "why": "Ближайшие события на часах" }
-  ]
-}
-```
+ponytail: a package that takes another's name gets its grants. Fine while the owner installs every package; a
+signature in the package header when the store installs apps for others.
 
-| Field | Rule |
-|---|---|
-| `package` | equals `name` in the package's `WP2A` header (≤ 23 bytes). The phone keys grants by it |
-| `version` | equals the header `version`. The companion refuses a file whose header does not match the record |
-| `uses[].cap` | a capability from the table below. Unknown cap: the companion refuses the install and asks for an update of itself |
-| `uses[].why` | one line shown on the consent screen, ≤ 80 chars |
+## Permissions
 
-Capabilities in v1:
+Capabilities:
 
 | Cap | Methods | OS permission |
 |---|---|---|
 | (none) | `caps` | — |
-| `calendar.read` | `calendar.events` | EventKit full access (iOS 17+: `requestFullAccessToEvents`), `READ_CALENDAR` |
+| `calendar` | `calendar.events` | EventKit full access (iOS 17+ `requestFullAccessToEvents`); `READ_CALENDAR` |
+| `location` | `location` | When In Use, reduced accuracy is enough; `ACCESS_COARSE_LOCATION` |
+| `weather` | `weather` | the same as `location` (the phone needs it; the watch gets no position) |
+| `http:<host>` | `http.get` to that host | — |
+| `notifications` | `notifications` | Android: notification listener access. iOS: none possible, the method answers `UNAVAILABLE` |
 
-Install flow:
+Flow:
 
-1. Companion fetches the record, checks `package`/`version` against the downloaded header.
-2. If `uses` is not empty: consent screen listing each cap with its `why`. Declined: no install.
-3. OS permission prompt for each cap that needs one. Denied: install anyway, the method answers `DENIED` and the
-   miniapp says "allow in the phone app".
-4. Grants stored on the phone as `package → [cap]`. An update whose `uses` adds a cap goes back to step 2; removing the
-   app from the watch drops its grants. The companion's settings list every package's grants with a switch each.
+1. A method whose cap this package has no answer for yet: reply `ASK`. The phone keeps a pending request
+   (package, cap) and posts a local notification "‹package› wants ‹cap›", at most once a day per pair.
+2. The companion's Permissions screen (opened from that notification or from Settings) lists pending requests and
+   every package's grants. Allow asks for the OS permission the cap needs, if it is not given yet; Deny is kept too.
+3. Later calls: granted and OS permission on → the method runs; denied, or the OS permission is off → `DENIED`, and no
+   new notification.
+4. Each grant can be revoked on the same screen. Per package there is also one switch, "Show text on the watch"
+   (off by default): calendar titles and notification text. See "Personal data".
 
-## RPC
+A manifest on fmc.tools that declares caps ahead (a consent screen at install) can come later, when the site has a
+collection for apps; it would only pre-fill these grants.
 
-All integers little-endian. Every RPC message opens with the magic `R1`, so a miniapp can keep its own messages
-(any other prefix) on the same channel.
+## Messages
 
-### Request (watch → phone)
+All integers little-endian. Every RPC message opens with `R1`, so a miniapp keeps its own messages (any other prefix)
+on the same channel. A message that opens with `R1` but is not a request the phone can read gets `BAD_REQUEST`
+(if it has an id byte) or is dropped.
+
+Request (watch → phone):
 
 ```
 "R1" ‖ 'Q' ‖ id:u8 ‖ method:u8 ‖ args
 ```
 
-`id` is the app's counter; the phone echoes it. The app ignores replies whose `id` is not the latest one it sent.
-
-### Reply (phone → watch)
+Reply (phone → watch):
 
 ```
 "R1" ‖ 'A' ‖ id:u8 ‖ status:u8 ‖ index:u8 ‖ total:u8 ‖ record
 ```
 
-- A result of `total` records goes as `total` messages, `index` = 0…total−1, in order, one record each
-  (≤ 121 bytes). The phone sends them with `KSession.send`, which already retries `FULL`/`PAUSED`, so the app just
-  drains `recv` in its loop.
-- Empty result: one message, `status` 0, `index` 0, `total` 0, no record.
-- Error: one message, `index` 0, `total` 0, no record.
+- `id` is the app's counter; the phone echoes it. The app ignores replies whose `id` is not its latest.
+- A result of `total` records goes as `total` messages, `index` 0…total−1, one record each (≤ 121 bytes), sent with
+  `KSession.send` (it retries `FULL`/`PAUSED`), so the app drains `recv` in its loop.
+- Empty result or any error: one message, `index` 0, `total` 0, no record.
+- The phone handles one request at a time, in order of arrival, and keeps no state per request.
+- No answer at all (phone asleep, out of range, companion not running): the app shows its cached copy (`store`,
+  4 KiB) and asks again after 3 s, then less often.
 
-| `status` | Meaning |
+| `status` | |
 |---|---|
 | 0 `OK` | |
 | 1 `BAD_REQUEST` | unknown method, bad args |
-| 2 `DENIED` | the package has no grant for the method's cap, or the OS permission is off |
-| 3 `UNAVAILABLE` | the phone cannot answer right now (e.g. calendar store not ready) |
+| 2 `DENIED` | the user denied the cap, or its OS permission is off |
+| 3 `UNAVAILABLE` | the phone cannot answer now: no location fix, network down or timeout, iOS notifications |
+| 4 `ASK` | the user has not answered yet; the phone asked. Show "Allow on your phone" |
+| 5 `TOO_LARGE` | `http.get` body over 2048 bytes |
 
-No answer at all (phone asleep, out of range, companion not running): the app keeps showing its cached copy
-(`store`, 4 KiB) and asks again after 3 s, then less often. The app owns retries; the phone keeps no state per
-request.
+Text fields are UTF-8, cut by the phone at a character boundary to the stated size (`utf8_cut` vectors).
+Characters the watch has no glyph for stay as they are (they draw as `?`).
 
-### Methods
+## Methods
 
-#### `0x01 caps`
+| Id | Method | Cap |
+|---|---|---|
+| `0x01` | `caps` | — |
+| `0x10` | `calendar.events` | `calendar` |
+| `0x20` | `location` | `location` |
+| `0x30` | `weather` | `weather` |
+| `0x40` | `http.get` | `http:<host>` |
+| `0x50` | `notifications` | `notifications` |
+
+### `0x01 caps`
 
 Args: none. One record: the method ids this package may call now (granted and OS permission on), one byte each.
-A miniapp calls it once at start to show "allow in the phone app" instead of an empty screen.
+A miniapp calls it at start to tell "allow on your phone" from an empty result.
 
-#### `0x10 calendar.events`
+### `0x10 calendar.events`
 
-Args:
+Args: `from_day:i8 ‖ days:u8 ‖ limit:u8`. `from_day` 0 = today (phone's local date), `days` 1–7, `limit` 1–20;
+out-of-range values are clamped. Events from the calendars visible in the system calendar app, sorted by start,
+all-day events first within a day.
 
-```
-from_day:i8 ‖ days:u8 ‖ limit:u8
-```
-
-`from_day` 0 = today (phone's local date), `days` 1–7, `limit` 1–20. The phone clamps out-of-range values instead
-of failing. Events from the calendars selected in the companion (default: all visible), sorted by start, all-day
-events first within a day.
-
-Record:
+Record (`calendar`, `calendar_dates` vectors):
 
 ```
 day:i8 ‖ start:u16 ‖ duration:u16 ‖ flags:u8 ‖ color:u16 ‖ title
@@ -126,35 +131,72 @@ day:i8 ‖ start:u16 ‖ duration:u16 ‖ flags:u8 ‖ color:u16 ‖ title
 |---|---|
 | `day` | days from today, phone's local date |
 | `start` | minute of the day, local; 0 for all-day |
-| `duration` | minutes; an event past midnight keeps its full length (the app clips) |
-| `flags` | bit 0 all-day, bit 1 tentative, bit 2 title hidden |
-| `color` | calendar colour as RGB565 |
-| `title` | UTF-8, the rest of the message, ≤ 64 bytes (one `text` call), cut by the phone at a character boundary. Characters the watch has no glyph for are left as they are (they draw as `?`). Empty with flag bit 2 |
+| `duration` | real minutes from start to end (60 for 01:30–03:30 on a spring-forward day); all-day: 1440 × days |
+| `flags` | bit 0 all-day, bit 1 tentative, bit 2 text hidden |
+| `color` | calendar colour, RGB565 |
+| `title` | ≤ 64 bytes; empty with bit 2 |
 
-Example: today 09:30–10:00, untitled ("title hidden"), red, reply 0 of 1 to request 7:
+### `0x20 location`
+
+Args: none. One record (`location` vectors):
 
 ```
-52 31 41 07 00 00 01   00 3A 02 1E 00 04 00 F8
+lat:i16 ‖ lon:i16 ‖ age:u16 ‖ place
 ```
+
+`lat`, `lon` in 0.1° (about 10 km), rounded. `age` minutes since the fix, `0xFFFF` for older. `place` the locality
+("Москва"), ≤ 32 bytes, may be empty. The phone uses its last known location and refreshes it while the companion
+is in the foreground or when asked and allowed; no fix at all: `UNAVAILABLE`.
+
+### `0x30 weather`
+
+Args: `days:u8`, 0–7: daily records wanted after the current one. Records (`weather` vectors):
+
+```
+current: 0:u8 ‖ temp:i16 ‖ code:u8 ‖ wind:u8 ‖ humidity:u8 ‖ age:u8
+daily:   1:u8 ‖ day:i8 ‖ min:i8 ‖ max:i8 ‖ code:u8 ‖ precip:u8
+```
+
+`temp` in 0.1 °C, `min`/`max` in °C, `wind` m/s, `humidity` and `precip` (probability) in %, `age` minutes since the
+data was fetched (capped at 255), `day` 0 = today. `code` is a WMO weather code as Open-Meteo gives it (0 clear;
+1–3 clouds; 45, 48 fog; 51–57 drizzle; 61–67 rain; 71–77 snow; 80–82 showers; 85, 86 snow showers; 95–99
+thunderstorm). Source: WeatherKit on iOS (conditions mapped to these codes), Open-Meteo on Android. The phone caches
+for 30 min and fetches with a 6 s timeout; nothing cached and no network: `UNAVAILABLE`.
+
+### `0x40 http.get`
+
+Args: the URL, UTF-8, `https://` only, ≤ 123 bytes. Cap `http:<host>` for the URL's host. GET without cookies, with
+`User-Agent: FMC-Companion`, 6 s timeout, redirects only within the same host. Records (`http` vectors):
+
+```
+first: code:u16 ‖ length:u16
+then:  the body in chunks of 121 bytes
+```
+
+Any HTTP code is `OK` with that code; a body over 2048 bytes is `TOO_LARGE`; no answer in time or no network:
+`UNAVAILABLE`. The app's own server should answer compactly: the watch has 4 KiB of storage.
+
+### `0x50 notifications`
+
+Android only; iOS answers `UNAVAILABLE`. Args: `limit:u8`, 1–10. Records, newest first (`notifications` vectors):
+
+```
+age:u16 ‖ flags:u8 ‖ app_len:u8 ‖ app ‖ text
+```
+
+The notifications shown now, without ongoing ones (music, navigation) and the companion's own. `age` minutes since
+posted, `flags` bit 2 text hidden, `app` the app's label ≤ 24 bytes, `text` "title: text" ≤ 64 bytes, empty with
+bit 2.
 
 ## Personal data
 
-Calendar titles are what the SDK says never to send: K is readable by any BLE client, so anyone in range can read
-them off the air. v1 therefore sends **no titles by default** (flag bit 2, empty title): time, length and colour
-only. A per-app switch in the companion, "Show event titles on the watch", turns titles on, with a line saying
-others nearby could read them (decided 2026-11-17). Locations, attendees and notes are never sent.
+Calendar titles, notification text and location are what the SDK says never to send: K is readable by any BLE
+client, so anyone in range can read them off the air.
+
+- Titles and notification text: off by default (bit 2, empty text); the per-package "Show text on the watch" switch
+  turns them on, with a line saying others nearby could read them.
+- Location: only 0.1° and the locality, and only after the user allowed `location` for that package, with the same
+  line on the permission screen.
+- Never sent: event locations, attendees, notes; notification senders' details beyond the text; precise coordinates.
 
 A real fix needs a key the watch and phone share that does not leave over the air; out of scope here.
-
-## Tests
-
-`ios/WireKit/Tests/WireKitTests/rpc-vectors.json`, read by both apps as `vectors.json` is: request bytes → parsed
-request, and (events, clock, timezone) → reply bytes, including a title cut mid-Cyrillic at 64 bytes, an event across
-midnight and a DST day.
-
-## Later, not in v1
-
-- More services (`weather`, `http.get` with a domain allow-list in the manifest, `music.control`) follow the same
-  pattern: a cap, its methods, a record layout.
-- A phone-side script per miniapp (sandboxed JS with only these services as its API) if a miniapp ever needs logic
-  the fixed services cannot express.
