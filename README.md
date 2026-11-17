@@ -19,7 +19,6 @@ xcodebuild -project FMCCompanion.xcodeproj -scheme FMCCompanion \
 
 `project.yml` generates the project (`xcodegen generate`); the generated `FMCCompanion.xcodeproj` is committed.
 
-Demo mode (a toggle in the app, or launch with `-demo YES`) shows a sample watch, for App Review and the simulator.
 The watch connection uses the link Nothing X already holds and the channel key K
 ([cmf-watch-sdk docs/abi-1.4.md](https://github.com/cmf-tech-community/cmf-watch-sdk/blob/main/docs/abi-1.4.md),
 "Writing a host"): no pairing popup, Nothing X keeps working. The app only reads the watch for now.
@@ -36,7 +35,6 @@ JDK 17 and the Android SDK (`ANDROID_HOME`). The transport is a port of WireKit 
 `app/src/main/java/tools/fmc/companion/wire`; its tests read `vectors.json` and `watchface-vectors.json` from
 `ios/WireKit/Tests/WireKitTests` in place, so both apps always run the same vectors.
 
-Android 12+. Demo mode is the switch on the Watch tab; debug builds also take
-`adb shell am start -n tools.fmc.companion/.MainActivity --ez demo true --ei tab 1 --ez check true`.
+Android 12+. Debug builds take `adb shell am start -n tools.fmc.companion/.MainActivity --ei tab 1 --ez check true`.
 The watch connection is a second GATT client on the link Nothing X holds; on Android this is not yet tried on a real
 watch. Watch faces need Nothing X closed first, as on iOS.

@@ -14,13 +14,6 @@ import WireKit
     }
 
     var phase = Phase.idle
-    var demo = UserDefaults.standard.bool(forKey: "demo") {
-        didSet {
-            UserDefaults.standard.set(demo, forKey: "demo")
-            phase = .idle
-            if demo { RPCListener.shared.stop() } else { RPCListener.shared.start() }
-        }
-    }
 
     var loader: LoaderState? {
         if case .checked(let s) = phase { s } else { nil }
@@ -29,9 +22,9 @@ import WireKit
     func check() async {
         phase = .checking
         do {
-            let state = demo ? try await Self.demoState() : try await read()
+            let state = try await read()
             phase = .checked(state)
-            if !demo { RPCListener.shared.update(state) }
+            RPCListener.shared.update(state)
         } catch {
             phase = .failed(error.localizedDescription)
         }
@@ -61,15 +54,5 @@ import WireKit
         let (fresh, newSecret) = try await KSession.open(link: link, register: false)
         Keychain.set(account, newSecret)
         return (fresh, try await readLoader(fresh))
-    }
-
-    /// What the App Store review sees without a watch.
-    static func demoState() async throws -> LoaderState {
-        try await Task.sleep(for: .seconds(1))
-        let loader = PackageHeader(kind: 1, name: "loader", version: 20_261_115)
-        return LoaderState(stub: Stub(version: 5, abiMinor: 3), loader: loader, apps: [
-            0: PackageHeader(kind: 0, name: "Orbit", version: 1),
-            1: PackageHeader(kind: 0, name: "Vibration Lab", version: 2),
-        ])
     }
 }

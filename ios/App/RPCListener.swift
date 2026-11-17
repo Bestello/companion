@@ -38,7 +38,7 @@ actor KLock {
     private var apps: [Int: String] = [:]
 
     func start() {
-        guard task == nil, !UserDefaults.standard.bool(forKey: "demo") else { return }
+        guard task == nil else { return }
         task = Task {
             while !Task.isCancelled {
                 let stock = await listen()

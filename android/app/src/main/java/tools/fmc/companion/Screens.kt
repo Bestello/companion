@@ -261,16 +261,6 @@ fun FaceScreen(model: AppModel, id: String, back: () -> Unit) {
         }
     }
 
-    /** What Play review sees without a watch: the progress of a real install, nothing sent. */
-    fun demoInstall() = scope.launch {
-        for (step in 0..20) {
-            progress = step / 20f
-            kotlinx.coroutines.delay(80)
-        }
-        progress = null
-        installed = true
-    }
-
     val install = withBluetooth { closeNothingX = true }
 
     Column {
@@ -292,11 +282,10 @@ fun FaceScreen(model: AppModel, id: String, back: () -> Unit) {
                                 LinearProgressIndicator({ p }, Modifier.fillMaxWidth().padding(horizontal = 20.dp))
                             } else {
                                 PrimaryButton(if (installed) "Installed" else "Install", !installed && f.binURL != null) {
-                                    if (model.demo) demoInstall() else install()
+                                    install()
                                 }
                             }
-                            Text(if (model.demo) "Demo mode: installs on the sample watch."
-                                else "Close Nothing X before installing: the watch talks to one app at a time.",
+                            Text("Close Nothing X before installing: the watch talks to one app at a time.",
                                 style = MaterialTheme.typography.bodySmall, color = Fmc.secondary, textAlign = TextAlign.Center)
                         }
                     }
@@ -383,9 +372,8 @@ fun WatchScreen(model: AppModel, permissions: () -> Unit, signIn: () -> Unit) {
         Bar("FMC Companion")
         LazyColumn {
             item {
-                Section(footer = if (model.demo) "Demo mode: a sample watch with the App Loader and two apps."
-                else "Keep the watch connected in Nothing X. The app only reads from it.") {
-                    WatchStatus(model) { if (model.demo) model.check() else check() }
+                Section(footer = "Keep the watch connected in Nothing X. The app only reads from it.") {
+                    WatchStatus(model) { check() }
                 }
             }
             model.loader?.let { state ->
@@ -447,11 +435,6 @@ fun WatchScreen(model: AppModel, permissions: () -> Unit, signIn: () -> Unit) {
             item {
                 Section("Settings", footer = "Watch apps ask for your calendar, location, weather, notifications or a website. " +
                     "You answer each one on the Permissions screen.") {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Demo mode", Modifier.weight(1f))
-                        Switch(model.demo, model::switchDemo)
-                    }
-                    HorizontalDivider()
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Services for watch apps", Modifier.weight(1f))
                         Switch(model.services, { on -> if (on) startServices() else model.switchServices(false) })
@@ -520,7 +503,7 @@ private fun WatchStatus(model: AppModel, check: () -> Unit) {
             }
             Column {
                 val title = when (phase) {
-                    Phase.Idle -> if (model.demo) "Sample watch" else "Not connected"
+                    Phase.Idle -> "Not connected"
                     Phase.Checking -> "Reading the watch…"
                     is Phase.Checked -> "Connected"
                     is Phase.Failed -> "Couldn't connect"

@@ -36,9 +36,8 @@ class MainActivity : ComponentActivity() {
             nav.signingIn = false
             nav.permissions = true
         }
-        // Screenshots and manual checks without a watch: adb shell am start -n … --ez demo true --ei tab 1 --ez check true
+        // Screenshots and manual checks: adb shell am start -n … --ei tab 1 --ez check true
         if (BuildConfig.DEBUG) {
-            if (intent.hasExtra("demo")) model.switchDemo(intent.getBooleanExtra("demo", false))
             if (intent.hasExtra("tab")) nav.tab = intent.getIntExtra("tab", 0)
             if (intent.getBooleanExtra("signin", false)) nav.signingIn = true
             if (intent.getBooleanExtra("check", false)) model.check()

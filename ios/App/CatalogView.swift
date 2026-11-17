@@ -201,7 +201,7 @@ struct FaceDetail: View {
                 .padding(.horizontal, 20)
         } else {
             Button {
-                if watch.demo { Task { await demoInstall() } } else { closeNothingX = true }
+                closeNothingX = true
             } label: {
                 Label(installed ? "Installed" : "Install",
                       systemImage: installed ? "checkmark" : "arrow.down.circle")
@@ -212,8 +212,7 @@ struct FaceDetail: View {
     }
 
     private var footer: LocalizedStringKey {
-        if watch.demo { "Demo mode: installs on the sample watch." }
-        else { "Close Nothing X before installing: the watch talks to one app at a time." }
+        "Close Nothing X before installing: the watch talks to one app at a time."
     }
 
     private func fetchAndInstall() async {
@@ -257,15 +256,5 @@ struct FaceDetail: View {
     private func answer(_ id: UInt32?) {
         picking?.resume(returning: id)
         picking = nil
-    }
-
-    /// What the App Store review sees without a watch: the progress of a real install, nothing sent.
-    private func demoInstall() async {
-        for step in 0...20 {
-            progress = Double(step) / 20
-            try? await Task.sleep(for: .milliseconds(80))
-        }
-        progress = nil
-        installed = true
     }
 }

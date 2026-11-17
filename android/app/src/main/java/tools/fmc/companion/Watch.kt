@@ -51,15 +51,6 @@ suspend fun readWatch(context: Context, store: SecureStore): LoaderState? {
     }
 }
 
-/** What Play review sees without a watch. */
-suspend fun demoState(): LoaderState {
-    delay(1000)
-    return LoaderState(
-        Stub(5, 3), PackageHeader(1, "loader", 20_261_115),
-        mapOf(0 to PackageHeader(0, "Orbit", 1), 1 to PackageHeader(0, "Vibration Lab", 2)),
-    )
-}
-
 class FaceInstallError(message: String) : Exception(message)
 
 fun refusalText(why: FaceRefusal) = when (why) {

@@ -36,8 +36,6 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         private set
     var phase by mutableStateOf<Phase>(Phase.Idle)
         private set
-    var demo by mutableStateOf(prefs.getBoolean("demo", false))
-        private set
 
     var services by mutableStateOf(prefs.getBoolean("services", false))
         private set
@@ -59,16 +57,10 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun switchDemo(on: Boolean) {
-        demo = on
-        prefs.edit().putBoolean("demo", on).apply()
-        phase = Phase.Idle
-    }
-
     fun check() = viewModelScope.launch {
         phase = Phase.Checking
         phase = try {
-            Phase.Checked(if (demo) demoState() else readWatch(getApplication(), store))
+            Phase.Checked(readWatch(getApplication(), store))
         } catch (e: Exception) {
             Phase.Failed(e.message ?: "Couldn't read the watch.")
         }

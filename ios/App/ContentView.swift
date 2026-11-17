@@ -29,7 +29,7 @@ struct FMCCompanionApp: App {
             .tint(.fmcAccent)
             .task { await account.restore() }
             #if DEBUG
-            // Screenshots: `-demo YES -check` reads the sample watch on launch
+            // `-check` reads the watch on launch
             .task { if CommandLine.arguments.contains("-check") { await watch.check() } }
             // `-open <link>`: what onOpenURL gets, without the system's "Open in" prompt
             .task {
@@ -56,24 +56,19 @@ struct ContentView: View {
     @State private var signingIn = CommandLine.arguments.contains("-signin")
 
     var body: some View {
-        @Bindable var watch = watch
         @Bindable var perms = Permissions.shared
         NavigationStack {
             List {
                 Section {
                     WatchStatus()
                 } footer: {
-                    Text(watch.demo ? "Demo mode: a sample watch with the App Loader and two apps."
-                                    : "Keep the watch connected in Nothing X. The app only reads from it.")
+                    Text("Keep the watch connected in Nothing X. The app only reads from it.")
                 }
                 if let state = watch.loader {
                     LoaderSection(state: state)
                 }
                 FacesOnWatchSection()
                 Section("Settings") {
-                    Toggle(isOn: $watch.demo) {
-                        Label("Demo mode", systemImage: "sparkles")
-                    }
                     NavigationLink {
                         PermissionsView()
                     } label: {
@@ -148,7 +143,7 @@ struct WatchStatus: View {
 
     private var title: LocalizedStringKey {
         switch watch.phase {
-        case .idle: watch.demo ? "Sample watch" : "Not connected"
+        case .idle: "Not connected"
         case .checking: "Reading the watch…"
         case .checked: "Connected"
         case .failed: "Couldn't connect"
