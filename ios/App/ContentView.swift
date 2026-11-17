@@ -175,6 +175,7 @@ struct WatchStatus: View {
 
 /// The watch's faces as the last install from this app saw them.
 struct FacesOnWatchSection: View {
+    @Environment(Catalog.self) private var catalog
     @State private var faces: [DialSlot] = []
     @State private var date: Date?
     /// [count, capacity] from the a055 header, side-loaded dials included
@@ -186,12 +187,26 @@ struct FacesOnWatchSection: View {
             if faces.isEmpty {
                 Text("Install a face to see what's on the watch").foregroundStyle(.secondary)
             }
-            ForEach(faces) { face in
-                HStack(spacing: 14) {
-                    Badge { Text("\(face.index + 1)").font(.system(.title3, design: .rounded, weight: .bold)) }
-                    Text(face.label).font(.body.weight(.semibold))
+            if !faces.isEmpty {
+                // as Nothing X and fmc.tools show them: the round previews in the watch's own order
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: 14)], spacing: 14) {
+                    ForEach(faces) { slot in
+                        let face = slot.face(in: catalog)
+                        VStack(spacing: 6) {
+                            if let url = face?.previewURL ?? slot.savedPreview {
+                                FacePreview(url: url)
+                            } else {
+                                // no picture anywhere for stock and Nothing X faces: the watch's place for it
+                                Circle().fill(.black).aspectRatio(1, contentMode: .fit).overlay {
+                                    Text("\(slot.index + 1)").font(.system(.title, design: .rounded, weight: .bold))
+                                        .foregroundStyle(Color.fmcAccent)
+                                }
+                            }
+                            Text(face?.name ?? slot.label).font(.caption.weight(.semibold)).lineLimit(1)
+                        }
+                    }
                 }
-                .padding(.vertical, 2)
+                .padding(.vertical, 6)
             }
         } header: {
             if let count, count.count == 2 { Text("Watch faces · \(count[0]) of \(count[1])") } else { Text("Watch faces") }
@@ -201,6 +216,8 @@ struct FacesOnWatchSection: View {
                 + Text(header.isEmpty ? "" : "\nWatch header: \(header)").monospaced()
             }
         }
+        // the catalog loads with the Watch faces tab; this one can come first
+        .task { if catalog.all.isEmpty { await catalog.load() } }
         .onAppear {
             let ids = UserDefaults.standard.array(forKey: "faces-on-watch") as? [UInt32] ?? []
             faces = ids.enumerated().map { DialSlot(id: $1, index: $0) }

@@ -26,10 +26,28 @@ enum FaceInstallError: LocalizedError {
 /// A dial on the watch. `index`: its place in the watch's own carousel, the only handle on a dial nobody named.
 struct DialSlot: Identifiable {
     let id: UInt32, index: Int
-    /// Faces this app installed keep their name; the watch only reports ids.
+    /// The watch only reports ids: faces this app installed keep their name, stock ones are named from fmc.tools'
+    /// stock-dials.json, Nothing X gallery ones have nothing to go on.
     var label: String {
-        UserDefaults.standard.string(forKey: "dial-name-\(id)") ?? String(localized: "Face \(index + 1)")
+        UserDefaults.standard.string(forKey: "dial-name-\(id)") ?? Self.stock[id] ?? String(localized: "Face \(index + 1)")
     }
+
+    /// The preview of a face this app installed (a draft that is in no list now, or a face since deleted).
+    var savedPreview: URL? { UserDefaults.standard.url(forKey: "dial-preview-\(id)") }
+
+    /// An FMC catalog face, from this app or from fmc.tools: its dial id is `dialId(record id)`.
+    @MainActor func face(in catalog: Catalog) -> Watchface? {
+        (catalog.mine + catalog.all).first { dialId($0.id) == id }
+    }
+
+    /// fmc_frontend modules/device/lib/stock-dials.json: id → name of the factory and Nothing gallery faces.
+    static let stock: [UInt32: String] = {
+        struct Entry: Decodable { var name: String }
+        guard let url = Bundle.main.url(forResource: "stock-dials", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let map = try? JSONDecoder().decode([String: Entry].self, from: data) else { return [:] }
+        return Dictionary(uniqueKeysWithValues: map.compactMap { k, v in UInt32(k).map { ($0, v.name) } })
+    }()
 }
 
 /// ble.ts WF_CAPACITY
