@@ -12,6 +12,10 @@ struct FMCCompanionApp: App {
                 .environment(account)
                 .environment(watch)
                 .task { await account.restore() }
+                #if DEBUG
+                // Screenshots: `-demo YES -check` reads the sample watch on launch
+                .task { if CommandLine.arguments.contains("-check") { await watch.check() } }
+                #endif
         }
     }
 }
@@ -19,6 +23,8 @@ struct FMCCompanionApp: App {
 struct ContentView: View {
     @Environment(Account.self) private var account
     @Environment(WatchModel.self) private var watch
+    // DEBUG screenshots: `-signin` opens Sign in
+    @State private var signingIn = CommandLine.arguments.contains("-signin")
 
     var body: some View {
         @Bindable var watch = watch
@@ -41,11 +47,12 @@ struct ContentView: View {
                         Button("Sign out") { account.signOut() }
                         DeleteAccountButton()
                     } else {
-                        NavigationLink("Sign in") { SignInView() }
+                        Button("Sign in") { signingIn = true }
                     }
                 }
             }
             .navigationTitle("FMC Companion")
+            .navigationDestination(isPresented: $signingIn) { SignInView() }
         }
     }
 }
