@@ -47,7 +47,12 @@ class BleLink(private val context: Context) : Link {
     private val chars = mutableMapOf<String, BluetoothGattCharacteristic>()
     private val handlers = CopyOnWriteArrayList<(String, ByteArray) -> Unit>()
     private val ops = Mutex()
-    @Volatile private var step: CompletableDeferred<Unit>? = null
+    /** The GATT operation in flight and the callback that ends it; callbacks of another kind are not ours. */
+    private class Step(val op: Op, val done: CompletableDeferred<Unit> = CompletableDeferred())
+    private enum class Op { CONNECT, MTU, SERVICES, DESCRIPTOR, WRITE }
+
+    @Volatile private var step: Step? = null
+    @Volatile private var dropped = false
     @Volatile private var mtu = 23
 
     /** Keys the cached secrets of this watch; a hash, so no MAC sits in the app's files. */
@@ -63,15 +68,17 @@ class BleLink(private val context: Context) : Link {
         if (!adapter.isEnabled) throw BleError.off
         fun isWatch(d: BluetoothDevice) = d.name?.startsWith(WATCH_NAME) == true
         val device = manager.getConnectedDevices(BluetoothProfile.GATT).firstOrNull(::isWatch)
-            ?: adapter.bondedDevices.firstOrNull(::isWatch)
+            // a watch with Bluetooth calls is bonded twice under one name, once as BR/EDR: that one has no GATT
+            ?: adapter.bondedDevices.firstOrNull { isWatch(it) && it.type != BluetoothDevice.DEVICE_TYPE_CLASSIC }
             ?: (if (scan) scan() else null)
             ?: throw BleError.noWatch
         watchId = sha256Hex(device.address).take(16)
         // connected → MTU → services → every notify on
-        gattStep { gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE) }
+        dropped = false
+        gattStep(Op.CONNECT) { gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE) }
         val g = gatt ?: throw BleError.noWatch
-        gattStep { g.requestMtu(247) }
-        gattStep { g.discoverServices() }
+        gattStep(Op.MTU) { g.requestMtu(247) }
+        gattStep(Op.SERVICES) { g.discoverServices() }
         for (s in g.services) for (c in s.characteristics) {
             val name = c.uuid.toString().uppercase()
             if (name in KNOWN) chars[name] = c
@@ -81,14 +88,14 @@ class BleLink(private val context: Context) : Link {
             val c = chars[name] ?: continue
             g.setCharacteristicNotification(c, true)
             val d = c.getDescriptor(CCCD) ?: continue
-            gattStep { writeDescriptor(g, d) }
+            gattStep(Op.DESCRIPTOR) { writeDescriptor(g, d) }
         }
     }
 
     fun disconnect() {
         gatt?.run { disconnect(); close() }
         gatt = null
-        step?.completeExceptionally(BleError.dropped)
+        step?.done?.completeExceptionally(BleError.dropped)
     }
 
     override fun onNotify(handler: (String, ByteArray) -> Unit) {
@@ -97,13 +104,13 @@ class BleLink(private val context: Context) : Link {
 
     /** A frame over MTU-3 goes as one write with response (abi-1.4.md, step 4); Android splits it. */
     override suspend fun write(uuid: String, data: ByteArray) = ops.withLock {
-        val g = gatt ?: throw BleError.dropped
+        val g = gatt?.takeUnless { dropped } ?: throw BleError.dropped
         val c = chars[uuid] ?: throw BleError.missing
         val noResponse = c.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
         val type = if (data.size > mtu - 3 || !noResponse) BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
         else BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
         // Android acknowledges both kinds; waiting for it is the flow control
-        stepLocked {
+        stepLocked(Op.WRITE) {
             if (Build.VERSION.SDK_INT >= 33) {
                 g.writeCharacteristic(c, data, type) == BluetoothStatusCodes.SUCCESS
             } else {
@@ -130,13 +137,13 @@ class BleLink(private val context: Context) : Link {
     }
 
     /** One GATT step: started by `start`, finished by its callback. */
-    private suspend fun gattStep(start: () -> Any?) = ops.withLock { stepLocked(start) }
+    private suspend fun gattStep(op: Op, start: () -> Any?) = ops.withLock { stepLocked(op, start) }
 
-    private suspend fun stepLocked(start: () -> Any?) {
-        val s = CompletableDeferred<Unit>()
+    private suspend fun stepLocked(op: Op, start: () -> Any?) {
+        val s = Step(op)
         step = s
         if (start() == false) throw BleError("The watch did not take the request.")
-        withTimeout(STEP_MS) { s.await() }
+        withTimeout(STEP_MS) { s.done.await() }
     }
 
     private suspend fun scan(): BluetoothDevice? {
@@ -155,9 +162,11 @@ class BleLink(private val context: Context) : Link {
         }
     }
 
-    private fun finish(status: Int) {
-        val s = step ?: return
-        if (status == BluetoothGatt.GATT_SUCCESS) s.complete(Unit) else s.completeExceptionally(BleError("GATT error $status"))
+    /** Ends the step only if it waits for this kind of callback: Android 14+ sends every client of the shared link
+     * `onMtuChanged` when Nothing X changes the MTU, and a write that timed out can still be acknowledged late. */
+    private fun finish(op: Op, status: Int) {
+        val s = step?.takeIf { it.op == op } ?: return
+        if (status == BluetoothGatt.GATT_SUCCESS) s.done.complete(Unit) else s.done.completeExceptionally(BleError("GATT error $status"))
     }
 
     private fun dispatch(c: BluetoothGattCharacteristic, value: ByteArray) {
@@ -168,19 +177,24 @@ class BleLink(private val context: Context) : Link {
     private val callback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, state: Int) {
             when (state) {
-                BluetoothProfile.STATE_CONNECTED -> finish(BluetoothGatt.GATT_SUCCESS)
-                BluetoothProfile.STATE_DISCONNECTED -> step?.completeExceptionally(BleError.dropped)
+                BluetoothProfile.STATE_CONNECTED -> finish(Op.CONNECT, BluetoothGatt.GATT_SUCCESS)
+                BluetoothProfile.STATE_DISCONNECTED -> {
+                    dropped = true // the next write fails at once, not after STEP_MS
+                    step?.done?.completeExceptionally(BleError.dropped)
+                }
             }
         }
 
         override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) this@BleLink.mtu = mtu
-            finish(BluetoothGatt.GATT_SUCCESS) // a refused MTU leaves 23: long writes still work
+            finish(Op.MTU, BluetoothGatt.GATT_SUCCESS) // a refused MTU leaves 23: long writes still work
         }
 
-        override fun onServicesDiscovered(g: BluetoothGatt, status: Int) = finish(status)
-        override fun onDescriptorWrite(g: BluetoothGatt, d: BluetoothGattDescriptor, status: Int) = finish(status)
-        override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) = finish(status)
+        override fun onServicesDiscovered(g: BluetoothGatt, status: Int) = finish(Op.SERVICES, status)
+        override fun onDescriptorWrite(g: BluetoothGatt, d: BluetoothGattDescriptor, status: Int) =
+            finish(Op.DESCRIPTOR, status)
+        override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) =
+            finish(Op.WRITE, status)
 
         override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray) =
             dispatch(c, value)

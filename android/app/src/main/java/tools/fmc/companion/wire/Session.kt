@@ -1,5 +1,6 @@
 package tools.fmc.companion.wire
 
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.channels.Channel as Queue
@@ -62,7 +63,7 @@ fun interface Requester {
 suspend fun Requester.call(c2: Int, payload: ByteArray) = call(c2, payload, 6000)
 
 internal fun <T> Queue<T>.drain() {
-    while (tryReceive().isSuccess) Unit
+    while (tryReceive().isSuccess) {}
 }
 
 internal suspend fun <T> Queue<T>.next(timeoutMs: Long): T? =
@@ -83,11 +84,12 @@ class KSession private constructor(private val link: Link, val key: ByteArray, v
         suspend fun open(link: Link, secretHex: String? = null, pollMs: Long? = null, register: Boolean = true):
             Pair<KSession, String> {
             val shell = Queue<ByteArray>(Queue.UNLIMITED)
-            var session: KSession? = null
+            // written here, read on the binder thread: the atomic publishes it (Swift: SessionBox)
+            val session = AtomicReference<KSession?>()
             link.onNotify { uuid, value ->
                 when (uuid.uppercase()) {
                     Uuid.SHELL_NOTIFY -> shell.trySend(value)
-                    Uuid.CMD_NOTIFY -> session?.feed(value)
+                    Uuid.CMD_NOTIFY -> session.get()?.feed(value)
                 }
             }
             var secret = secretHex
@@ -109,7 +111,7 @@ class KSession private constructor(private val link: Link, val key: ByteArray, v
             }
             val key = channelKey(secret) ?: throw WireError.Refused(0xFF)
             val s = KSession(link, key, pollMs)
-            session = s
+            session.set(s)
             if (register) s.ping()
             return s to secret
         }
