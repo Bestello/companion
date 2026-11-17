@@ -114,9 +114,14 @@ struct FaceDetail: View {
     @Environment(WatchModel.self) private var watch
     @State private var face: Watchface?
     @State private var error: String?
-    /// Demo install progress: 0…1, nil when idle.
+    /// Install progress: 0…1, nil when idle.
     @State private var progress: Double?
     @State private var installed = false
+    // DEBUG screenshots: `-install` opens the Nothing X warning
+    @State private var closeNothingX = CommandLine.arguments.contains("-install")
+    /// A file past the safe image size, waiting for the user's yes.
+    @State private var big: (bin: Data, w: Int, h: Int)?
+    @State private var failure: String?
 
     var body: some View {
         List {
@@ -151,6 +156,27 @@ struct FaceDetail: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Close Nothing X first", isPresented: $closeNothingX) {
+            Button("Install") { Task { await fetchAndInstall() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The watch talks to one app at a time. Close Nothing X (swipe it away in the app switcher), then install.\n\nAfterwards Nothing X may not see the watch. Then forget the watch in Bluetooth settings and add it again in Nothing X.")
+        }
+        .alert("Large images", isPresented: Binding { big != nil } set: { if !$0 { big = nil } }) {
+            Button("Install anyway", role: .destructive) {
+                if let bin = big?.bin { Task { await upload(bin) } }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            if let big {
+                Text("This face has a \(big.w)×\(big.h) px image, larger than factory faces use. Large images can make the watch restart in a loop.")
+            }
+        }
+        .alert("Couldn't install", isPresented: Binding { failure != nil } set: { if !$0 { failure = nil } }) {
+            Button("OK") {}
+        } message: {
+            Text(failure ?? "")
+        }
         .task(id: id) {
             do { face = try await catalog.face(id, account: account) } catch { self.error = error.localizedDescription }
         }
@@ -162,19 +188,50 @@ struct FaceDetail: View {
                 .padding(.horizontal, 20)
         } else {
             Button {
-                Task { await demoInstall() }
+                if watch.demo { Task { await demoInstall() } } else { closeNothingX = true }
             } label: {
                 Label(installed ? "Installed" : "Install",
                       systemImage: installed ? "checkmark" : "arrow.down.circle")
             }
             .buttonStyle(.primary)
-            .disabled(!watch.demo || installed || face.binURL == nil)
+            .disabled(installed || face.binURL == nil)
         }
     }
 
     private var footer: LocalizedStringKey {
         if watch.demo { "Demo mode: installs on the sample watch." }
-        else { "Installing from the app comes with the next update. Until then, install it on fmc.tools." }
+        else { "Close Nothing X before installing: the watch talks to one app at a time." }
+    }
+
+    private func fetchAndInstall() async {
+        guard let face else { return }
+        progress = 0
+        do {
+            let (bin, verdict) = try await FaceInstall.fetch(face)
+            if case .confirm(let w, let h) = verdict {
+                progress = nil
+                big = (bin, w, h)
+                return
+            }
+            await upload(bin)
+        } catch {
+            progress = nil
+            failure = error.localizedDescription
+        }
+    }
+
+    private func upload(_ bin: Data) async {
+        guard let face else { return }
+        progress = 0
+        defer { progress = nil }
+        do {
+            try await FaceInstall.install(bin, seed: face.id) { p in
+                Task { @MainActor in progress = Double(p) / 100 }
+            }
+            installed = true
+        } catch {
+            failure = error.localizedDescription
+        }
     }
 
     /// What the App Store review sees without a watch: the progress of a real install, nothing sent.
