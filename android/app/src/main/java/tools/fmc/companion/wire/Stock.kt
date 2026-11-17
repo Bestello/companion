@@ -123,6 +123,20 @@ fun sessionKey(nonce: ByteArray, k1: ByteArray) = sha256(nonce, k1).copyOf(16)
 fun parseInstalledDials(p: ByteArray): List<Long> =
     (4 until p.size - 3 step 4).map { p.le32(it) }.filter { it != 0xFFFF_FFFFL }
 
+/**
+ * `a055`'s 4-byte header, read as `01 ‖ active? ‖ count ‖ capacity`. Unconfirmed reading from five samples
+ * (watch_health docs/cmf-protocol.md §9.5d-h, fmc_frontend ble.ts): `count` matched the dials on the watch side-loaded
+ * ones included (which the id list leaves out), `capacity` was always 7. null when it doesn't look like that.
+ */
+data class DialCount(val count: Int, val capacity: Int)
+
+fun parseDialCount(p: ByteArray): DialCount? {
+    if (p.size < 4) return null
+    val count = p[2].toInt() and 0xFF
+    val capacity = p[3].toInt() and 0xFF
+    return if (capacity > 0 && count <= capacity) DialCount(count, capacity) else null
+}
+
 /** `init2`: ctr_type 3 ‖ old_wf_id ‖ new_wf_id ‖ size, little endian. */
 fun uploadInit(old: Long, new: Long, size: Int) = buf { u8(3); le32(old); le32(new); le32(size.toLong()) }
 
@@ -148,6 +162,10 @@ class StockSession(private val link: Link, private val mtu: Int = 180) {
 
     /** Latest `a055`: the dials the watch reported (side-loaded ones are missing from it). */
     @Volatile var reported: List<Long>? = null
+    /** Latest `a055` header: how many dials, side-loaded included, and how many fit ([parseDialCount]). */
+    @Volatile var dialCount: DialCount? = null
+    /** Latest `a055` header, raw, for field reports. */
+    @Volatile var dialHeader: ByteArray? = null
         private set
 
     init {
@@ -170,7 +188,11 @@ class StockSession(private val link: Link, private val mtu: Int = 180) {
         } catch (_: StockFailure) {
             return
         } ?: return
-        if (got.first == StockCmd.WF_INSTALLED) reported = parseInstalledDials(got.second)
+        if (got.first == StockCmd.WF_INSTALLED) {
+            reported = parseInstalledDials(got.second)
+            dialHeader = got.second.copyOf(minOf(4, got.second.size))
+            dialCount = parseDialCount(got.second)
+        }
         inbox.trySend(got)
     }
 

@@ -221,6 +221,9 @@ class StockTest {
     @Test fun installedDials() {
         val p = buf { add(bytes(1, 5, 6, 7)); le32(273); le32(0xFFFF_FFFFL); le32(12345) }
         assertEquals(listOf(273L, 12345L), parseInstalledDials(p))
+        assertEquals(DialCount(6, 7), parseDialCount(p))
+        assertEquals(null, parseDialCount(bytes(1, 0, 9, 7)))
+        assertEquals(null, parseDialCount(bytes(1, 0)))
     }
 
     @Test fun confirmedPopupBindsAgain() = runBlocking {

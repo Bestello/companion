@@ -39,18 +39,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Image
 
-// Design tokens and components, after ios/App/Style.swift: workout-companion is the base (monochrome accent,
+// Design tokens and components, after ios/App/Style.swift: workout-companion is the base (
 // grouped sections, filled number badges), Zeron adds capsule buttons and status colors.
 
 private val light = lightColorScheme(
-    primary = Color(0xFF18181B), onPrimary = Color.White,
+    primary = Color(0xFFFFC700), onPrimary = Color(0xFF1C1C1C), // fmc.tools --color-accent / --color-on-accent
     background = Color(0xFFF2F2F7), onBackground = Color(0xFF18181B),
     surface = Color.White, onSurface = Color(0xFF18181B), surfaceVariant = Color(0xFFE5E5EA),
     onSurfaceVariant = Color(0xFF6B6B70), secondaryContainer = Color(0xFFE9E9EE), onSecondaryContainer = Color(0xFF18181B),
     surfaceContainer = Color.White, error = Color(0xFFDC2626),
 )
 private val dark = darkColorScheme(
-    primary = Color(0xFFECECEC), onPrimary = Color.Black,
+    primary = Color(0xFFFFC700), onPrimary = Color(0xFF131313),
     background = Color.Black, onBackground = Color(0xFFECECEC),
     surface = Color(0xFF1C1C1E), onSurface = Color(0xFFECECEC), surfaceVariant = Color(0xFF2C2C2E),
     onSurfaceVariant = Color(0xFF9A9AA0), secondaryContainer = Color(0xFF2C2C2E), onSecondaryContainer = Color(0xFFECECEC),
@@ -106,7 +106,7 @@ fun Metric(value: String, unit: String, modifier: Modifier = Modifier) = Column(
 
 private val capsule = PaddingValues(horizontal = 20.dp, vertical = 15.dp)
 
-/** Zeron's primary button: a full-width capsule in the text color. */
+/** Zeron's primary button: a full-width capsule in the accent (fmc.tools .kind__primary). */
 @Composable
 fun PrimaryButton(text: String, enabled: Boolean = true, onClick: () -> Unit) =
     Button(onClick, Modifier.fillMaxWidth(), enabled = enabled, contentPadding = capsule) {

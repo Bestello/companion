@@ -218,6 +218,9 @@ func testFace(_ n: Int = 1000) -> Data {
     var p = Data([1, 5, 6, 7])
     for id: UInt32 in [273, 0xFFFF_FFFF, 12345] { p.le(id) }
     #expect(parseInstalledDials(p) == [273, 12345])
+    #expect(parseDialCount(p)! == (6, 7))
+    #expect(parseDialCount(Data([1, 0, 9, 7])) == nil)
+    #expect(parseDialCount(Data([1, 0])) == nil)
 }
 
 @Test func confirmedPopupBindsAgain() async throws {

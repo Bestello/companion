@@ -118,6 +118,15 @@ public func parseInstalledDials(_ p: Data) -> [UInt32] {
     stride(from: 4, to: p.count - 3, by: 4).map { p.le(UInt32.self, at: $0) }.filter { $0 != 0xFFFF_FFFF }
 }
 
+/// `a055`'s 4-byte header, read as `01 ‖ active? ‖ count ‖ capacity`. Unconfirmed reading from five samples
+/// (watch_health docs/cmf-protocol.md §9.5d-h, fmc_frontend ble.ts): `count` matched the dials on the watch side-loaded
+/// ones included (which the id list leaves out), `capacity` was always 7. nil when it doesn't look like that.
+public func parseDialCount(_ p: Data) -> (count: Int, capacity: Int)? {
+    guard p.count >= 4 else { return nil }
+    let count = Int(p[p.startIndex + 2]), capacity = Int(p[p.startIndex + 3])
+    return capacity > 0 && count <= capacity ? (count, capacity) : nil
+}
+
 /// `init2`: ctr_type 3 ‖ old_wf_id ‖ new_wf_id ‖ size, little endian.
 public func uploadInit(old: UInt32, new: UInt32, size: Int) -> Data {
     var d = Data([3])
@@ -148,6 +157,10 @@ public actor StockSession {
     private let inbox = Inbox<(UInt32, Data)>()
     /// Latest `a055`: the dials the watch reported (side-loaded ones are missing from it).
     public private(set) var reported: [UInt32]?
+    /// Latest `a055` header: how many dials, side-loaded included, and how many fit (`parseDialCount`).
+    public private(set) var dialCount: (count: Int, capacity: Int)?
+    /// Latest `a055` header, raw, for field reports.
+    public private(set) var dialHeader: Data?
 
     public init(link: Link, mtu: Int = 180) {
         (self.link, self.mtu) = (link, mtu)
@@ -172,7 +185,11 @@ public actor StockSession {
             return
         } catch { return }
         guard let (cmd, p) = got else { return }
-        if cmd == StockCmd.wfInstalled { reported = parseInstalledDials(p) }
+        if cmd == StockCmd.wfInstalled {
+            reported = parseInstalledDials(p)
+            dialHeader = Data(p.prefix(4))
+            dialCount = parseDialCount(p)
+        }
         await inbox.put((cmd, p))
     }
 

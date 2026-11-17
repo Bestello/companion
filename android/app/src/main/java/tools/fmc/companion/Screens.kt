@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -73,7 +74,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import tools.fmc.companion.wire.FaceVerdict
 
@@ -206,6 +209,8 @@ fun FaceScreen(model: AppModel, id: String, back: () -> Unit) {
     /** A file past the safe image size, waiting for the user's yes. */
     var big by remember { mutableStateOf<Triple<ByteArray, Int, Int>?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
+    /** The watch is full: the install waits here for the dial to replace. */
+    var picking by remember { mutableStateOf<Pair<List<DialSlot>, CompletableDeferred<Long?>>?>(null) }
 
     LaunchedEffect(id) {
         try { face = model.face(id) } catch (e: Exception) { error = e.message ?: "Couldn't load the watch face" }
@@ -215,10 +220,12 @@ fun FaceScreen(model: AppModel, id: String, back: () -> Unit) {
         val f = face ?: return@launch
         progress = 0f
         try {
-            installFaceOnWatch(context, model.store, bin, f.id) { p -> scope.launch { progress = p / 100f } }
+            installFaceOnWatch(context, model.store, bin, f.id, f.name, pick = { slots ->
+                CompletableDeferred<Long?>().also { picking = slots to it }.await()
+            }) { p -> scope.launch { progress = p / 100f } }
             installed = true
         } catch (e: CancellationException) {
-            throw e
+            if (!isActive) throw e // a dismissed slot dialog cancels the install, not the screen
         } catch (e: Exception) {
             failure = e.message ?: "The watch did not answer."
         } finally {
@@ -325,6 +332,24 @@ fun FaceScreen(model: AppModel, id: String, back: () -> Unit) {
             dismissButton = { TextButton({ big = null }) { Text("Cancel") } },
         )
     }
+    picking?.let { (slots, answer) ->
+        fun done(id: Long?) { picking = null; answer.complete(id) }
+        AlertDialog(
+            onDismissRequest = { done(null) },
+            title = { Text("The watch is full") },
+            text = {
+                Column {
+                    Text("Pick the face to replace. Faces are numbered in the order the watch shows them.",
+                        color = Fmc.secondary)
+                    slots.forEach { s ->
+                        TextButton({ done(s.id) }) { Text("Replace ${s.label}", color = Fmc.danger) }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton({ done(null) }) { Text("Cancel") } },
+        )
+    }
     failure?.let {
         AlertDialog(onDismissRequest = { failure = null }, title = { Text("Couldn't install") }, text = { Text(it) },
             confirmButton = { TextButton({ failure = null }) { Text("OK") } })
@@ -335,6 +360,7 @@ fun FaceScreen(model: AppModel, id: String, back: () -> Unit) {
 
 @Composable
 fun WatchScreen(model: AppModel, signIn: () -> Unit) {
+    val context = LocalContext.current
     val check = withBluetooth { model.check() }
     var deleting by remember { mutableStateOf(false) }
     var deleteError by remember { mutableStateOf<String?>(null) }
@@ -368,6 +394,22 @@ fun WatchScreen(model: AppModel, signIn: () -> Unit) {
                                     Text("Version ${app.version} · slot $slot", style = MaterialTheme.typography.bodyMedium, color = Fmc.secondary)
                                 }
                             }
+                        }
+                    }
+                }
+            }
+            item {
+                val on = remember { facesOnWatch(context) }
+                Section(on.count?.let { "Watch faces · $it" } ?: "Watch faces",
+                    footer = if (on.at == 0L) null else "As of the last install, " +
+                        DateUtils.getRelativeTimeSpanString(on.at) + ". Numbered in the order the watch shows them." +
+                        if (on.header.isEmpty()) "" else "\nWatch header: ${on.header}") {
+                    val faces = on.faces
+                    if (faces.isEmpty()) Text("Install a face to see what's on the watch", color = Fmc.secondary)
+                    faces.forEach { face ->
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Badge { Text("${face.index + 1}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
+                            Text(face.label, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }

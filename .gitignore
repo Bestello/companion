@@ -4,3 +4,5 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 .swiftpm/
+build/
+local.mk

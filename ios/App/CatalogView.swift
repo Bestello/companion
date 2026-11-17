@@ -122,6 +122,9 @@ struct FaceDetail: View {
     /// A file past the safe image size, waiting for the user's yes.
     @State private var big: (bin: Data, w: Int, h: Int)?
     @State private var failure: String?
+    /// The watch is full: the install waits here for the dial to replace.
+    @State private var slots: [DialSlot] = []
+    @State private var picking: CheckedContinuation<UInt32?, Never>?
 
     var body: some View {
         List {
@@ -171,6 +174,15 @@ struct FaceDetail: View {
             if let big {
                 Text("This face has a \(big.w)×\(big.h) px image, larger than factory faces use. Large images can make the watch restart in a loop.")
             }
+        }
+        .confirmationDialog("The watch is full", isPresented: Binding { picking != nil } set: {
+            // after a button's own answer, so a tap outside is the only thing that lands here
+            if !$0 { DispatchQueue.main.async { answer(nil) } }
+        }, titleVisibility: .visible) {
+            ForEach(slots) { s in Button("Replace \(s.label)", role: .destructive) { answer(s.id) } }
+            Button("Cancel", role: .cancel) { answer(nil) }
+        } message: {
+            Text("Pick the face to replace. Faces are numbered in the order the watch shows them.")
         }
         .alert("Couldn't install", isPresented: Binding { failure != nil } set: { if !$0 { failure = nil } }) {
             Button("OK") {}
@@ -225,13 +237,24 @@ struct FaceDetail: View {
         progress = 0
         defer { progress = nil }
         do {
-            try await FaceInstall.install(bin, seed: face.id) { p in
+            try await FaceInstall.install(bin, seed: face.id, name: face.name, pick: { slots in
+                await withCheckedContinuation { c in
+                    self.slots = slots
+                    picking = c
+                }
+            }) { p in
                 Task { @MainActor in progress = Double(p) / 100 }
             }
             installed = true
+        } catch is CancellationError {
         } catch {
             failure = error.localizedDescription
         }
+    }
+
+    private func answer(_ id: UInt32?) {
+        picking?.resume(returning: id)
+        picking = nil
     }
 
     /// What the App Store review sees without a watch: the progress of a real install, nothing sent.

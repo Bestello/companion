@@ -1,4 +1,5 @@
 import Foundation
+import os
 import WireKit
 
 // A watchface onto the watch the way fmc.tools does it through Bluefy (fmc_frontend ble.ts connect, pair,
@@ -22,6 +23,18 @@ enum FaceInstallError: LocalizedError {
     }
 }
 
+/// A dial on the watch. `index`: its place in the watch's own carousel, the only handle on a dial nobody named.
+struct DialSlot: Identifiable {
+    let id: UInt32, index: Int
+    /// Faces this app installed keep their name; the watch only reports ids.
+    var label: String {
+        UserDefaults.standard.string(forKey: "dial-name-\(id)") ?? String(localized: "Face \(index + 1)")
+    }
+}
+
+/// ble.ts WF_CAPACITY
+let capacity = 6
+
 enum FaceInstall {
     /// The file and the gate's verdict: nothing goes to the watch before the user has seen it.
     static func fetch(_ face: Watchface) async throws -> (Data, FaceVerdict) {
@@ -33,8 +46,10 @@ enum FaceInstall {
     }
 
     /// Connects, opens a stock session (a new bind only when the saved key is refused) and uploads.
-    @MainActor static func install(_ bin: Data, seed: String, progress: @escaping @Sendable (Int) -> Void)
-        async throws {
+    /// `pick`: the watch is full, which dial goes; nil cancels the install.
+    @MainActor static func install(_ bin: Data, seed: String, name: String,
+                                   pick: @MainActor ([DialSlot]) async -> UInt32?,
+                                   progress: @escaping @Sendable (Int) -> Void) async throws {
         let link = BLELink()
         defer { link.disconnect() }
         let watchdog = Task {
@@ -64,16 +79,47 @@ enum FaceInstall {
         let mine = UserDefaults.standard.array(forKey: "dials-\(watch)") as? [UInt32] ?? []
         let reported = await session.reported ?? []
         let installed = reported + mine.filter { !reported.contains($0) }
+        // the header counts side-loaded dials too; the hardcoded capacity and the id list are the fallback
+        let counted = await session.dialCount
+        let header = (await session.dialHeader ?? Data()).map { String(format: "%02x", $0) }.joined(separator: " ")
+        Logger(subsystem: "tools.fmc.companion", category: "dials")
+            .notice("a055 header \(header, privacy: .public), \(reported.count) listed, \(installed.count) known")
+        let cap = counted?.capacity ?? capacity
+        let full = counted.map { $0.count >= $0.capacity } ?? (installed.count >= capacity)
+        // which dial to replace (ble.ts NoFreeSlotError, slot-dialog.svelte)
+        func ask() async throws -> UInt32 {
+            guard let picked = await pick(installed.enumerated().map { DialSlot(id: $1, index: $0) })
+            else { throw CancellationError() }
+            return picked
+        }
+        // full and not a re-install of this face: ask before sending anything
+        var slot: UInt32?
+        if full, !installed.contains(dialId(seed)) { slot = try await ask() }
         let id: UInt32
         do {
-            // ponytail: no slot picker. A full watch is told to free a slot on the watch; add the picker
-            // (ble.ts NoFreeSlotError) if people hit it often.
-            id = try await installFace(session, bin, seed: seed, installed: installed, capacity: 6,
-                                       progress: progress)
+            do {
+                id = try await installFace(session, bin, seed: seed, installed: installed, capacity: cap,
+                                           slot: slot, progress: progress)
+            } catch UploadError.noFreeSlot where slot == nil && !installed.isEmpty {
+                // the count said there was room and the watch said no: the header reading is wrong, or it is missing
+                slot = try await ask()
+                id = try await installFace(session, bin, seed: seed, installed: installed, capacity: cap,
+                                           slot: slot, progress: progress)
+            }
         } catch UploadError.noFreeSlot {
             throw FaceInstallError.full
         }
-        if !installed.contains(id) { UserDefaults.standard.set(mine + [id], forKey: "dials-\(watch)") }
+        UserDefaults.standard.set(name, forKey: "dial-name-\(id)")
+        let now = mine.filter { $0 != slot } + (mine.contains(id) ? [] : [id])
+        UserDefaults.standard.set(now, forKey: "dials-\(watch)")
+        // what the Watch tab shows: reading it there would need Nothing X closed, an install has it anyway
+        let onWatch = slot.map { s in installed.map { $0 == s ? id : $0 } }
+            ?? (installed.contains(id) ? installed : installed + [id])
+        UserDefaults.standard.set(onWatch, forKey: "faces-on-watch")
+        UserDefaults.standard.set(Date(), forKey: "faces-on-watch-date")
+        let after = counted.map { slot != nil || installed.contains(id) ? $0.count : $0.count + 1 }
+        UserDefaults.standard.set(after.map { [$0, cap] }, forKey: "faces-on-watch-count")
+        UserDefaults.standard.set(header, forKey: "faces-on-watch-header")
     }
 }
 

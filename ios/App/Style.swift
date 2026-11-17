@@ -1,14 +1,15 @@
 import SwiftUI
 
 // Design tokens and components. Copied, not linked:
-// - workout-companion (ios/Workout/Style.swift, WatchView, ProgramView): the base. Monochrome accent, grouped
+// - workout-companion (ios/Workout/Style.swift, WatchView, ProgramView): the base. Grouped
 //   lists, the watch tile, filled number badges, SF Rounded for numbers.
 // - Zeron (apps/ios/Zeron/Design/Palette.swift, Cloud/CloudUI.swift): what workout-companion has no use for.
 //   Capsule primary/secondary buttons, the welcome layout of the sign-in page, status colors.
 
 extension Color {
-    /// workout-companion's AccentColor: near-black in light, near-white in dark.
-    static let fmcAccent = Color(light: 0x18181B, dark: 0xECECEC)
+    /// fmc.tools --color-accent and --color-on-accent (text on the accent: the site's text color).
+    static let fmcAccent = Color(light: 0xFFC700, dark: 0xFFC700)
+    static let fmcOnAccent = Color(light: 0x1C1C1C, dark: 0x131313)
     // Zeron Palette.success / warning / danger
     static let fmcSuccess = Color(light: 0x15803D, dark: 0x34D399)
     static let fmcWarning = Color(light: 0xA16207, dark: 0xFACC15)
@@ -32,7 +33,7 @@ struct Badge<Content: View>: View {
 
     var body: some View {
         content
-            .foregroundStyle(filled ? Color(.secondarySystemGroupedBackground) : .secondary)
+            .foregroundStyle(filled ? Color.fmcOnAccent : .secondary)
             .frame(width: side, height: side)
             .background(filled ? Color.fmcAccent : Color(.tertiarySystemGroupedBackground),
                         in: .rect(cornerRadius: side * 0.31, style: .continuous))
@@ -53,15 +54,15 @@ struct Metric: View {
     }
 }
 
-/// Zeron's primary button: a full-width capsule in the text color, semibold 17, 15/20 insets.
+/// Zeron's primary button: a full-width capsule in the accent (fmc.tools .kind__primary), semibold 17, 15/20 insets.
 struct PrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.body.weight(.semibold))
             .frame(maxWidth: .infinity)
             .padding(.vertical, 15).padding(.horizontal, 20)
-            .foregroundStyle(Color(.systemBackground))
-            .background(Color.primary, in: .capsule)
+            .foregroundStyle(Color.fmcOnAccent)
+            .background(Color.fmcAccent, in: .capsule)
             .opacity(configuration.isPressed ? 0.7 : 1)
             .modifier(Dimmed())
     }

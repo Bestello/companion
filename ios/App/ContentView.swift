@@ -66,6 +66,7 @@ struct ContentView: View {
                 if let state = watch.loader {
                     LoaderSection(state: state)
                 }
+                FacesOnWatchSection()
                 Section("Settings") {
                     Toggle(isOn: $watch.demo) {
                         Label("Demo mode", systemImage: "sparkles")
@@ -159,6 +160,44 @@ struct WatchStatus: View {
     }
 }
 
+/// The watch's faces as the last install from this app saw them.
+struct FacesOnWatchSection: View {
+    @State private var faces: [DialSlot] = []
+    @State private var date: Date?
+    /// [count, capacity] from the a055 header, side-loaded dials included
+    @State private var count: [Int]?
+    @State private var header = ""
+
+    var body: some View {
+        Section {
+            if faces.isEmpty {
+                Text("Install a face to see what's on the watch").foregroundStyle(.secondary)
+            }
+            ForEach(faces) { face in
+                HStack(spacing: 14) {
+                    Badge { Text("\(face.index + 1)").font(.system(.title3, design: .rounded, weight: .bold)) }
+                    Text(face.label).font(.body.weight(.semibold))
+                }
+                .padding(.vertical, 2)
+            }
+        } header: {
+            if let count, count.count == 2 { Text("Watch faces · \(count[0]) of \(count[1])") } else { Text("Watch faces") }
+        } footer: {
+            if let date {
+                Text("As of the last install, \(date.formatted(.relative(presentation: .named))). Numbered in the order the watch shows them.")
+                + Text(header.isEmpty ? "" : "\nWatch header: \(header)").monospaced()
+            }
+        }
+        .onAppear {
+            let ids = UserDefaults.standard.array(forKey: "faces-on-watch") as? [UInt32] ?? []
+            faces = ids.enumerated().map { DialSlot(id: $1, index: $0) }
+            date = UserDefaults.standard.object(forKey: "faces-on-watch-date") as? Date
+            count = UserDefaults.standard.array(forKey: "faces-on-watch-count") as? [Int]
+            header = UserDefaults.standard.string(forKey: "faces-on-watch-header") ?? ""
+        }
+    }
+}
+
 struct LoaderSection: View {
     let state: LoaderState
 
@@ -232,7 +271,7 @@ struct SignInView: View {
                     Button {
                         run { try await account.signIn(email: email.trimmingCharacters(in: .whitespaces), password: password) }
                     } label: {
-                        if busy { ProgressView().tint(Color(.systemBackground)) } else { Text("Sign in") }
+                        if busy { ProgressView().tint(.fmcOnAccent) } else { Text("Sign in") }
                     }
                     .buttonStyle(.primary)
                     .disabled(busy || email.isEmpty || password.isEmpty)
