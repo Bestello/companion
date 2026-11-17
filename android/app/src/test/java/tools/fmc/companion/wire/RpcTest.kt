@@ -32,7 +32,7 @@ class RpcTest {
 
     @Test fun cut() {
         each("utf8_cut") { t -> assertEquals(t.getString("hex"), utf8Cut(t.getString("text"), t.getInt("max")).hex()) }
-        assertEquals(63, utf8Cut("a".repeat(64), 64).size, "under max, as iOS (open question in utf8Cut)")
+        assertEquals(64, utf8Cut("a".repeat(64), 64).size, "a text of exactly max stays whole")
     }
 
     @Test fun calendar() = each("calendar") { t ->

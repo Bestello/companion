@@ -56,15 +56,11 @@ fun replies(id: Int, status: Int, records: List<ByteArray> = emptyList()): List<
     return records.mapIndexed { i, r -> msg(i, records.size, r) }
 }
 
-/**
- * UTF-8 of `s`, cut before a character that does not fit. OPEN QUESTION: the spec says ≤ `max` bytes, the
- * utf8_cut vectors keep it under `max` (62 of 64 where 64 fit), as if for a NUL-terminated buffer; iOS and this
- * keep every text under `max` until the owner settles it.
- */
+/** UTF-8 of `s`, at most `max` bytes, cut before a character that does not fit. */
 fun utf8Cut(s: String, max: Int): ByteArray {
     val b = s.toByteArray()
-    if (b.size < max) return b
-    var n = max - 1
+    if (b.size <= max) return b
+    var n = max
     while (n > 0 && (b[n].toInt() and 0xC0) == 0x80) n--
     return b.copyOf(n)
 }
