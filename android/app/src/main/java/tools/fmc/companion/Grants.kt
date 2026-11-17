@@ -24,9 +24,22 @@ class Grants(context: Context) {
     fun of(pkg: String): Map<String, Boolean> =
         parts("g|").filter { it.first == pkg }.associate { it.second to prefs.getBoolean("g|$pkg|${it.second}", false) }
 
-    /** pkg → cap → allowed, every package that has answered caps. */
-    fun all(): Map<String, Map<String, Boolean>> =
-        parts("g|").map { it.first }.distinct().sorted().associateWith(::of)
+    /** Every package that asked for something or has an answer. */
+    fun packages(): List<String> = (parts("g|") + parts("p|")).map { it.first }.distinct().sorted()
+
+    /** Every cap the package asked for or has an answer for. */
+    fun caps(pkg: String): List<String> = (parts("g|") + parts("p|")).filter { it.first == pkg }.map { it.second }.distinct().sorted()
+
+    fun isPending(pkg: String, cap: String) = prefs.contains("p|$pkg|$cap") && !prefs.contains("g|$pkg|$cap")
+
+    fun pendingCount(pkg: String) = caps(pkg).count { isPending(pkg, it) }
+
+    /** Forgets every answer: the next calls ask again. */
+    fun reset(pkg: String) {
+        val e = prefs.edit()
+        prefs.all.keys.filter { it.startsWith("g|$pkg|") || it.startsWith("p|$pkg|") || it == "show|$pkg" }.forEach { e.remove(it) }
+        e.apply()
+    }
 
     /** (pkg, cap) asked and not answered yet. */
     fun pending(): List<Pair<String, String>> = parts("p|").filter { it.second !in of(it.first) }
@@ -69,14 +82,14 @@ fun osAllows(context: Context, cap: String): Boolean = when {
 fun channel(context: Context, id: String, name: String, importance: Int) =
     context.getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(id, name, importance))
 
-/** Opens the Permissions screen. */
-fun permissionsIntent(context: Context): PendingIntent = PendingIntent.getActivity(
-    context, 1, Intent(context, MainActivity::class.java).putExtra("permissions", true)
-        .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+/** Opens the asking app's page, or with no package the Apps list. A request code per package keeps their extras apart. */
+fun appsIntent(context: Context, pkg: String? = null): PendingIntent = PendingIntent.getActivity(
+    context, pkg?.hashCode() ?: 1,
+    Intent(context, MainActivity::class.java).putExtra("apps", true).putExtra("app", pkg).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
 )
 
-/** "‹package› wants ‹cap›"; nothing without POST_NOTIFICATIONS (the Permissions screen still lists it). */
+/** "‹package› wants ‹cap›"; nothing without POST_NOTIFICATIONS (its page under Apps still shows it). */
 fun notifyAsk(context: Context, pkg: String, cap: String) {
     if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
     channel(context, "ask", "Watch app requests", NotificationManager.IMPORTANCE_DEFAULT)
@@ -84,7 +97,7 @@ fun notifyAsk(context: Context, pkg: String, cap: String) {
         .setSmallIcon(R.drawable.ic_watch)
         .setContentTitle("$pkg wants ${capLabel(cap)}")
         .setContentText("Allow or deny it in FMC Companion.")
-        .setContentIntent(permissionsIntent(context))
+        .setContentIntent(appsIntent(context, pkg))
         .setAutoCancel(true)
         .build()
     context.getSystemService(NotificationManager::class.java).notify("$pkg|$cap".hashCode(), n)

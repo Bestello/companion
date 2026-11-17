@@ -31,10 +31,13 @@ class MainActivity : ComponentActivity() {
             nav.signingIn = false
             nav.face = it
         }
-        if (intent.getBooleanExtra("permissions", false)) {
-            nav.face = null
-            nav.signingIn = false
-            nav.permissions = true
+        // the ask notification (with the package) and the service's (without); in DEBUG also for screenshots:
+        // adb shell am start -n … --ez apps true [--es app <package>]
+        if (intent.getBooleanExtra("apps", false)) {
+            nav.root()
+            nav.tab = 1
+            nav.app = intent.getStringExtra("app")
+            nav.apps = nav.app == null
         }
         // Screenshots and manual checks: adb shell am start -n … --ei tab 1 --ez check true
         if (BuildConfig.DEBUG) {
