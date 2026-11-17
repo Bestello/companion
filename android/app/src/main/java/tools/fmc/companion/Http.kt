@@ -45,3 +45,46 @@ suspend fun download(url: String): ByteArray = withContext(Dispatchers.IO) {
         c.disconnect()
     }
 }
+
+/**
+ * A GET for the miniapp services: (status, body), any status. No cookies (none are set app-wide),
+ * `User-Agent: FMC-Companion`, redirects followed only within the same host, at most `max` bytes read (+1 to tell
+ * a longer body). `timeoutMs` bounds connect and each read; the dispatcher's budget bounds the whole.
+ */
+suspend fun fetch(url: String, timeoutMs: Int = 6000, max: Int = 1 shl 20): Pair<Int, ByteArray> = withContext(Dispatchers.IO) {
+    var u = URL(url)
+    repeat(5) {
+        val c = u.openConnection() as HttpURLConnection
+        try {
+            c.instanceFollowRedirects = false
+            c.useCaches = false
+            c.connectTimeout = timeoutMs
+            c.readTimeout = timeoutMs
+            c.setRequestProperty("User-Agent", "FMC-Companion")
+            val status = c.responseCode
+            val next = c.getHeaderField("Location")?.let { URL(u, it) }
+            if (status in 300..399 && next != null) {
+                if (next.protocol != "https" || !next.host.equals(u.host, ignoreCase = true)) return@withContext status to ByteArray(0)
+                u = next
+                return@repeat
+            }
+            val body = (if (status < 400) c.inputStream else c.errorStream)?.use { readUpTo(it, max + 1) } ?: ByteArray(0)
+            return@withContext status to body
+        } finally {
+            c.disconnect()
+        }
+    }
+    throw ServerError(310, "Too many redirects")
+}
+
+/** InputStream.readNBytes is API 33. */
+private fun readUpTo(input: java.io.InputStream, n: Int): ByteArray {
+    val out = java.io.ByteArrayOutputStream()
+    val b = ByteArray(8192)
+    while (out.size() < n) {
+        val k = input.read(b, 0, minOf(b.size, n - out.size()))
+        if (k < 0) break
+        out.write(b, 0, k)
+    }
+    return out.toByteArray()
+}

@@ -85,21 +85,22 @@ class Nav {
     var tab by mutableStateOf(0)
     var face by mutableStateOf<String?>(null)
     var signingIn by mutableStateOf(false)
+    var permissions by mutableStateOf(false)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun App(model: AppModel, nav: Nav) {
-    BackHandler(nav.face != null || nav.signingIn) {
-        if (nav.signingIn) nav.signingIn = false else nav.face = null
+    BackHandler(nav.face != null || nav.signingIn || nav.permissions) {
+        if (nav.signingIn) nav.signingIn = false else if (nav.permissions) nav.permissions = false else nav.face = null
     }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                NavigationBarItem(nav.tab == 0, { nav.tab = 0; nav.face = null; nav.signingIn = false },
+                NavigationBarItem(nav.tab == 0, { nav.tab = 0; nav.face = null; nav.signingIn = false; nav.permissions = false },
                     icon = { Icon(Icons.Default.Home, null) }, label = { Text("Watch faces") })
-                NavigationBarItem(nav.tab == 1, { nav.tab = 1; nav.face = null; nav.signingIn = false },
+                NavigationBarItem(nav.tab == 1, { nav.tab = 1; nav.face = null; nav.signingIn = false; nav.permissions = false },
                     icon = { Icon(painterResource(R.drawable.ic_watch), null, Modifier.size(24.dp)) }, label = { Text("Watch") })
             }
         },
@@ -107,9 +108,10 @@ fun App(model: AppModel, nav: Nav) {
         Column(Modifier.padding(pad)) {
             when {
                 nav.signingIn -> SignInScreen(model) { nav.signingIn = false }
+                nav.permissions -> PermissionsScreen { nav.permissions = false }
                 nav.face != null -> FaceScreen(model, nav.face!!) { nav.face = null }
                 nav.tab == 0 -> CatalogScreen(model) { nav.face = it }
-                else -> WatchScreen(model) { nav.signingIn = true }
+                else -> WatchScreen(model, { nav.permissions = true }) { nav.signingIn = true }
             }
         }
     }
@@ -117,7 +119,7 @@ fun App(model: AppModel, nav: Nav) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Bar(title: String, back: (() -> Unit)? = null) = TopAppBar(
+fun Bar(title: String, back: (() -> Unit)? = null) = TopAppBar(
     title = { Text(title, fontWeight = FontWeight.Bold) },
     navigationIcon = { back?.let { IconButton(it) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } } },
     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
@@ -359,9 +361,12 @@ fun FaceScreen(model: AppModel, id: String, back: () -> Unit) {
 // Watch
 
 @Composable
-fun WatchScreen(model: AppModel, signIn: () -> Unit) {
+fun WatchScreen(model: AppModel, permissions: () -> Unit, signIn: () -> Unit) {
     val context = LocalContext.current
     val check = withBluetooth { model.check() }
+    // the ASK notifications need POST_NOTIFICATIONS; the services run without it
+    val notify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { model.switchServices(true) }
+    val startServices = withBluetooth { notify.launch(Manifest.permission.POST_NOTIFICATIONS) }
     var deleting by remember { mutableStateOf(false) }
     var deleteError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -415,10 +420,21 @@ fun WatchScreen(model: AppModel, signIn: () -> Unit) {
                 }
             }
             item {
-                Section("Settings") {
+                Section("Settings", footer = "Watch apps ask for your calendar, location, weather, notifications or a website. " +
+                    "You answer each one on the Permissions screen.") {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Demo mode", Modifier.weight(1f))
                         Switch(model.demo, model::switchDemo)
+                    }
+                    HorizontalDivider()
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Services for watch apps", Modifier.weight(1f))
+                        Switch(model.services, { on -> if (on) startServices() else model.switchServices(false) })
+                    }
+                    HorizontalDivider()
+                    Row(Modifier.fillMaxWidth().clickable(onClick = permissions), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Permissions", Modifier.weight(1f))
+                        Text("›", color = Fmc.secondary)
                     }
                 }
             }

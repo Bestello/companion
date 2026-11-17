@@ -39,6 +39,16 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     var demo by mutableStateOf(prefs.getBoolean("demo", false))
         private set
 
+    var services by mutableStateOf(prefs.getBoolean("services", false))
+        private set
+
+    /** The miniapp services' foreground service (RpcService); on again at every launch while switched on. */
+    fun switchServices(on: Boolean) {
+        services = on
+        prefs.edit().putBoolean("services", on).apply()
+        if (on) RpcService.start(getApplication()) else RpcService.stop(getApplication())
+    }
+
     val loader get() = (phase as? Phase.Checked)?.state
 
     init {

@@ -166,7 +166,10 @@ class KSession private constructor(private val link: Link, val key: ByteArray, v
         }
     }
 
-    override suspend fun recv(timeoutMs: Long): ByteArray {
+    override suspend fun recv(timeoutMs: Long): ByteArray = recvFrom(timeoutMs).second
+
+    /** The next message of the app and the slot that sent it (`EVENT` plain: seq ‖ slot ‖ data). */
+    suspend fun recvFrom(timeoutMs: Long): Pair<Int, ByteArray> {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (true) {
             val left = deadline - System.currentTimeMillis()
@@ -174,7 +177,7 @@ class KSession private constructor(private val link: Link, val key: ByteArray, v
             val body = events.next(pollMs?.let { minOf(it, left) } ?: left)
             if (body != null) {
                 val plain = open(key, body)
-                if (plain != null && plain.size >= 3) return plain.copyOfRange(2, plain.size)
+                if (plain != null && plain.size >= 3) return plain.u8(1) to plain.copyOfRange(2, plain.size)
                 continue
             }
             if (pollMs != null) runCatching { ping() }
