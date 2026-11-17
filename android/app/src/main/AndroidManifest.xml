@@ -10,6 +10,23 @@
         android:usesPermissionFlags="neverForLocation" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
+    <!-- Miniapp services (docs/miniapp-rpc.md): a foreground service holds the link; each service's own permission
+         is asked when the user allows a watch app to use it. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- App names for the notifications service. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -41,5 +58,18 @@
                 <data android:scheme="https" android:host="fmc.tools" android:pathPrefix="/market/" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".RpcService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice|location" />
+        <service
+            android:name=".NotificationWatcher"
+            android:exported="true"
+            android:label="Watch apps"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

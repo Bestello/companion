@@ -28,7 +28,7 @@ The watch connection uses the link Nothing X already holds and the channel key K
 
 ```bash
 cd android
-./gradlew testDebugUnitTest   # transport: frames, K session, install, App Loader INFO, watchface upload, links
+./gradlew testDebugUnitTest   # transport: frames, K session, install, App Loader INFO, watchface upload, links, miniapp RPC
 ./gradlew assembleDebug
 ```
 
