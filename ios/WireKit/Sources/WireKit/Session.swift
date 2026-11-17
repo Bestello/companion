@@ -130,12 +130,20 @@ public actor KSession: Channel {
     }
 
     public func recv(timeout: Duration) async throws -> Data {
+        try await recvFrom(timeout: timeout).data
+    }
+
+    /// The next app message and the slot of the app that sent it (EVENT plain = seq ‖ slot ‖ data). Android:
+    /// `recvFrom(timeoutMs): Pair<Int, ByteArray>`.
+    public func recvFrom(timeout: Duration) async throws -> (slot: UInt8, data: Data) {
         let deadline = ContinuousClock.now + timeout
         while true {
             let left = deadline - ContinuousClock.now
             guard left > .zero else { throw WireError.timeout("no message") }
             if let body = await events.next(timeout: poll.map { min($0, left) } ?? left) {
-                if let plain = WireKit.open(key, body), plain.count >= 3 { return Data(plain.dropFirst(2)) }
+                if let plain = WireKit.open(key, body), plain.count >= 3 {
+                    return (plain[plain.startIndex + 1], Data(plain.dropFirst(2)))
+                }
                 continue
             }
             if poll != nil { _ = try? await ping() }

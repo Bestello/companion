@@ -14,6 +14,11 @@ targets:
     sources: [App]
     dependencies:
       - package: WireKit
+    # WeatherKit for the miniapp weather service: the capability is also enabled for the App ID in Apple Developer
+    entitlements:
+      path: App/FMCCompanion.entitlements
+      properties:
+        com.apple.developer.weatherkit: true
     info:
       path: App/Info.plist
       properties:
@@ -22,6 +27,8 @@ targets:
         UIBackgroundModes: [bluetooth-central]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSBluetoothAlwaysUsageDescription: FMC Companion connects to your watch to install watch faces and to read which apps are on it.
+        NSCalendarsFullAccessUsageDescription: Watch apps you allow show your upcoming events on the watch.
+        NSLocationWhenInUseUsageDescription: Watch apps you allow get the weather and your town, rounded to about 10 km.
         ITSAppUsesNonExemptEncryption: false
         # fmc://install?url=… from the Install button on fmc.tools (FaceLink in Catalog.swift)
         CFBundleURLTypes:

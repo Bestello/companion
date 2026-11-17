@@ -18,6 +18,7 @@ import WireKit
         didSet {
             UserDefaults.standard.set(demo, forKey: "demo")
             phase = .idle
+            if demo { RPCListener.shared.stop() } else { RPCListener.shared.start() }
         }
     }
 
@@ -28,7 +29,9 @@ import WireKit
     func check() async {
         phase = .checking
         do {
-            phase = .checked(demo ? try await Self.demoState() : try await read())
+            let state = demo ? try await Self.demoState() : try await read()
+            phase = .checked(state)
+            if !demo { RPCListener.shared.update(state) }
         } catch {
             phase = .failed(error.localizedDescription)
         }
@@ -43,16 +46,21 @@ import WireKit
         }
         defer { watchdog.cancel() }
         try await link.connect()
+        return try await KLock.shared.run { try await Self.open(link) }.1
+    }
+
+    /// A K session on `link` and the loader it reads: the cached K first, read again once when it gets no answer
+    /// (K changes with a factory reset). Hold KLock: the RPC listener talks K on its own link.
+    static func open(_ link: BLELink) async throws -> (KSession, LoaderState?) {
         let account = "k-\(link.watchID?.uuidString ?? "")"
         let cached = Keychain.get(account)
         let (session, secret) = try await KSession.open(link: link, secretHex: cached, register: false)
         Keychain.set(account, secret)
-        if let state = try await readLoader(session) { return state }
-        // K changes with a factory reset: a cached one that gets no answer is read again once
-        guard cached != nil else { return nil }
+        if let state = try await readLoader(session) { return (session, state) }
+        guard cached != nil else { return (session, nil) }
         let (fresh, newSecret) = try await KSession.open(link: link, register: false)
         Keychain.set(account, newSecret)
-        return try await readLoader(fresh)
+        return (fresh, try await readLoader(fresh))
     }
 
     /// What the App Store review sees without a watch.
