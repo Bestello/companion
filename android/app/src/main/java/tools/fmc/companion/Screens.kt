@@ -1,6 +1,7 @@
 package tools.fmc.companion
 
 import android.Manifest
+import tools.fmc.companion.wire.UploadError
 import tools.fmc.companion.wire.dialId
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
@@ -67,6 +68,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -401,13 +403,29 @@ fun WatchScreen(model: AppModel, permissions: () -> Unit, signIn: () -> Unit) {
                 }
             }
             item {
-                val on = remember { facesOnWatch(context) }
+                var reads by remember { mutableIntStateOf(0) }
+                var reading by remember { mutableStateOf(false) }
+                var readError by remember { mutableStateOf<String?>(null) }
+                // right after each connect
+                LaunchedEffect(model.phase) {
+                    if (model.phase !is Phase.Checked) return@LaunchedEffect
+                    reading = true
+                    readError = try {
+                        readFacesOnWatch(context, model.store); null
+                    } catch (e: Exception) {
+                        if (e is CancellationException) throw e
+                        // no saved key: the first install from the app binds, the list comes after that
+                        if (e is UploadError.AuthFailed) null else "Couldn't read the faces on the watch: ${e.message}"
+                    }
+                    reading = false
+                    reads++
+                }
+                val on = remember(reads) { facesOnWatch(context) }
                 Section(on.count?.let { "Watch faces · $it" } ?: "Watch faces",
-                    footer = if (on.at == 0L) null else "As of the last install, " +
+                    footer = if (on.at == 0L) null else "Read " +
                         DateUtils.getRelativeTimeSpanString(on.at) + ". Numbered in the order the watch shows them." +
                         if (on.header.isEmpty()) "" else "\nWatch header: ${on.header}") {
                     val faces = on.faces
-                    if (faces.isEmpty()) Text("Install a face to see what's on the watch", color = Fmc.secondary)
                     // as Nothing X and fmc.tools show them: the round previews in the watch's own order. An FMC face,
                     // from here or fmc.tools, is dialId(record id) and has its catalog preview.
                     faces.chunked(3).forEach { row ->
@@ -430,6 +448,9 @@ fun WatchScreen(model: AppModel, permissions: () -> Unit, signIn: () -> Unit) {
                             repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                         }
                     }
+                    if (reading) Text("Reading the watch…", color = Fmc.secondary)
+                    else if (faces.isEmpty()) Text("Install a face from the app once: after that the list is read on every connect.", color = Fmc.secondary)
+                    readError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 }
             }
             item {

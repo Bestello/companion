@@ -5,6 +5,7 @@ import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
+import tools.fmc.companion.wire.DialCount
 import tools.fmc.companion.wire.FaceRefusal
 import tools.fmc.companion.wire.FaceVerdict
 import tools.fmc.companion.wire.KSession
@@ -120,11 +121,13 @@ fun facesOnWatch(context: Context): FacesOnWatch {
 /** ble.ts WF_CAPACITY */
 const val CAPACITY = 6
 
-/** [pick]: the watch is full, which dial goes; null cancels the install. */
-suspend fun installFaceOnWatch(
-    context: Context, store: SecureStore, bin: ByteArray, seed: String, name: String,
-    pick: suspend (List<DialSlot>) -> Long?, progress: (Int) -> Unit,
-) {
+/**
+ * Connects and opens a stock session (a new bind only when the saved key is refused, and [bind] allows one: it
+ * pops up on the watch), then [body].
+ */
+private suspend fun <T> withStockSession(
+    context: Context, store: SecureStore, bind: Boolean = true, body: suspend (StockSession, String) -> T,
+): T {
     val link = BleLink(context)
     try {
         withTimeout(30_000) { link.connect(scan = true) }
@@ -139,51 +142,81 @@ suspend fun installFaceOnWatch(
             val saved = store["stock-$watch"]?.let(::hexOrNull) ?: throw UploadError.AuthFailed
             session.authenticate(saved)
         } catch (e: Exception) {
-            if (e !is UploadError.AuthFailed && e !is WireError.Timeout) throw e
+            if (!bind || e !is UploadError.AuthFailed && e !is WireError.Timeout) throw e
             // no key yet, or the watch was bound again since (Nothing X, a reset): bind, as the site does
             val k1 = session.pair(hexOrNull(secret) ?: ByteArray(0))
             store["stock-$watch"] = k1.hex()
         }
         // a055 comes on its own after auth
         delay(1500)
-        val prefs = context.getSharedPreferences("dials", Context.MODE_PRIVATE)
-        val mine = prefs.getString("dials-$watch", "")!!.split(",").mapNotNull { it.toLongOrNull() }
-        val reported = session.reported ?: emptyList()
-        val installed = reported + mine.filter { it !in reported }
-        // the header counts side-loaded dials too; the hardcoded capacity and the id list are the fallback
-        val counted = session.dialCount
-        val header = (session.dialHeader ?: ByteArray(0)).joinToString(" ") { "%02x".format(it) }
-        Log.i("dials", "a055 header $header, ${reported.size} listed, ${installed.size} known")
-        val cap = counted?.capacity ?: CAPACITY
-        val full = counted?.let { it.count >= it.capacity } ?: (installed.size >= CAPACITY)
-        // which dial to replace (ble.ts NoFreeSlotError, slot-dialog.svelte)
-        suspend fun ask() = pick(installed.mapIndexed { i, d -> slot(context, prefs, d, i) })
-            ?: throw CancellationException("no dial picked")
-        // full and not a re-install of this face: ask before sending anything
-        var slot: Long? = if (full && dialId(seed) !in installed) ask() else null
-        val id = try {
-            try {
-                installFace(session, bin, seed, installed, cap, slot, progress = progress)
-            } catch (e: UploadError.NoFreeSlot) {
-                if (slot != null || installed.isEmpty()) throw e
-                // the count said there was room and the watch said no: the header reading is wrong, or it is missing
-                slot = ask()
-                installFace(session, bin, seed, installed, cap, slot, progress = progress)
-            }
-        } catch (_: UploadError.NoFreeSlot) {
-            throw FaceInstallError("The watch is full. Delete a face on the watch (long press the face, swipe one up) and try again.")
-        }
-        val now = mine.filter { it != slot } + if (id in mine) emptyList() else listOf(id)
-        // what the Watch tab shows: reading it there would need Nothing X closed, an install has it anyway
-        val onWatch = slot?.let { sl -> installed.map { if (it == sl) id else it } }
-            ?: if (id in installed) installed else installed + id
-        prefs.edit().putString("dials-$watch", now.joinToString(",")).putString("name-$id", name)
-            .putString("faces-on-watch", onWatch.joinToString(",")).putLong("faces-on-watch-date", System.currentTimeMillis())
-            .putString("faces-on-watch-count",
-                counted?.let { "${if (slot != null || id in installed) it.count else it.count + 1},$cap" })
-            .putString("faces-on-watch-header", header)
-            .apply()
+        return body(session, "$watch") // the keys were "dials-$watch" before: null stays "null"
     } finally {
         link.disconnect()
     }
+}
+
+private class Dials(val mine: List<Long>, val installed: List<Long>, val counted: DialCount?, val header: String)
+
+/** What the watch reported in a055, plus the dials this app put there that the list leaves out. */
+private fun dials(context: Context, session: StockSession, watch: String): Dials {
+    val prefs = context.getSharedPreferences("dials", Context.MODE_PRIVATE)
+    val mine = prefs.getString("dials-$watch", "")!!.split(",").mapNotNull { it.toLongOrNull() }
+    val reported = session.reported ?: emptyList()
+    val installed = reported + mine.filter { it !in reported }
+    // the header counts side-loaded dials too; the hardcoded capacity and the id list are the fallback
+    val header = (session.dialHeader ?: ByteArray(0)).joinToString(" ") { "%02x".format(it) }
+    Log.i("dials", "a055 header $header, ${reported.size} listed, ${installed.size} known")
+    return Dials(mine, installed, session.dialCount, header)
+}
+
+/** What the Watch tab shows. */
+private fun remember(context: Context, onWatch: List<Long>, count: Int?, capacity: Int, header: String) {
+    context.getSharedPreferences("dials", Context.MODE_PRIVATE).edit()
+        .putString("faces-on-watch", onWatch.joinToString(",")).putLong("faces-on-watch-date", System.currentTimeMillis())
+        .putString("faces-on-watch-count", count?.let { "$it,$capacity" })
+        .putString("faces-on-watch-header", header)
+        .apply()
+}
+
+/**
+ * Reads the dials off the watch for the Watch tab, with the saved key only: no bind popup on a watch this app never
+ * installed on. Takes the watch from Nothing X, like an install.
+ */
+suspend fun readFacesOnWatch(context: Context, store: SecureStore) = withStockSession(context, store, bind = false) { session, watch ->
+    val d = dials(context, session, watch)
+    remember(context, d.installed, d.counted?.count, d.counted?.capacity ?: CAPACITY, d.header)
+}
+
+/** [pick]: the watch is full, which dial goes; null cancels the install. */
+suspend fun installFaceOnWatch(
+    context: Context, store: SecureStore, bin: ByteArray, seed: String, name: String,
+    pick: suspend (List<DialSlot>) -> Long?, progress: (Int) -> Unit,
+) = withStockSession(context, store) { session, watch ->
+    val prefs = context.getSharedPreferences("dials", Context.MODE_PRIVATE)
+    val d = dials(context, session, watch)
+    val installed = d.installed
+    val cap = d.counted?.capacity ?: CAPACITY
+    val full = d.counted?.let { it.count >= it.capacity } ?: (installed.size >= CAPACITY)
+    // which dial to replace (ble.ts NoFreeSlotError, slot-dialog.svelte)
+    suspend fun ask() = pick(installed.mapIndexed { i, id -> slot(context, prefs, id, i) })
+        ?: throw CancellationException("no dial picked")
+    // full and not a re-install of this face: ask before sending anything
+    var slot: Long? = if (full && dialId(seed) !in installed) ask() else null
+    val id = try {
+        try {
+            installFace(session, bin, seed, installed, cap, slot, progress = progress)
+        } catch (e: UploadError.NoFreeSlot) {
+            if (slot != null || installed.isEmpty()) throw e
+            // the count said there was room and the watch said no: the header reading is wrong, or it is missing
+            slot = ask()
+            installFace(session, bin, seed, installed, cap, slot, progress = progress)
+        }
+    } catch (_: UploadError.NoFreeSlot) {
+        throw FaceInstallError("The watch is full. Delete a face on the watch (long press the face, swipe one up) and try again.")
+    }
+    val now = d.mine.filter { it != slot } + if (id in d.mine) emptyList() else listOf(id)
+    prefs.edit().putString("dials-$watch", now.joinToString(",")).putString("name-$id", name).apply()
+    val onWatch = slot?.let { sl -> installed.map { if (it == sl) id else it } }
+        ?: if (id in installed) installed else installed + id
+    remember(context, onWatch, d.counted?.let { if (slot != null || id in installed) it.count else it.count + 1 }, cap, d.header)
 }

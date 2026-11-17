@@ -168,20 +168,20 @@ struct WatchStatus: View {
     }
 }
 
-/// The watch's faces as the last install from this app saw them.
+/// The watch's faces as last read: by the button (stock session, Nothing X closed) or by an install.
 struct FacesOnWatchSection: View {
     @Environment(Catalog.self) private var catalog
+    @Environment(WatchModel.self) private var watch
     @State private var faces: [DialSlot] = []
     @State private var date: Date?
     /// [count, capacity] from the a055 header, side-loaded dials included
     @State private var count: [Int]?
     @State private var header = ""
+    @State private var reading = false
+    @State private var error: String?
 
     var body: some View {
         Section {
-            if faces.isEmpty {
-                Text("Install a face to see what's on the watch").foregroundStyle(.secondary)
-            }
             if !faces.isEmpty {
                 // as Nothing X and fmc.tools show them: the round previews in the watch's own order
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: 14)], spacing: 14) {
@@ -203,23 +203,48 @@ struct FacesOnWatchSection: View {
                 }
                 .padding(.vertical, 6)
             }
+            if reading {
+                HStack { Text("Reading the watch…").foregroundStyle(.secondary); Spacer(); ProgressView() }
+            } else if faces.isEmpty {
+                Text("Install a face from the app once: after that the list is read on every connect.")
+                    .foregroundStyle(.secondary)
+            }
+            if let error { Text(error).font(.footnote).foregroundStyle(.red) }
         } header: {
             if let count, count.count == 2 { Text("Watch faces · \(count[0]) of \(count[1])") } else { Text("Watch faces") }
         } footer: {
             if let date {
-                Text("As of the last install, \(date.formatted(.relative(presentation: .named))). Numbered in the order the watch shows them.")
+                Text("Read \(date.formatted(.relative(presentation: .named))). Numbered in the order the watch shows them.")
                 + Text(header.isEmpty ? "" : "\nWatch header: \(header)").monospaced()
             }
         }
         // the catalog loads with the Watch faces tab; this one can come first
         .task { if catalog.all.isEmpty { await catalog.load() } }
-        .onAppear {
-            let ids = UserDefaults.standard.array(forKey: "faces-on-watch") as? [UInt32] ?? []
-            faces = ids.enumerated().map { DialSlot(id: $1, index: $0) }
-            date = UserDefaults.standard.object(forKey: "faces-on-watch-date") as? Date
-            count = UserDefaults.standard.array(forKey: "faces-on-watch-count") as? [Int]
-            header = UserDefaults.standard.string(forKey: "faces-on-watch-header") ?? ""
+        .onAppear(perform: load)
+        // right after each connect
+        .task(id: watch.phase) { if case .checked = watch.phase { await read() } }
+    }
+
+    private func read() async {
+        reading = true
+        defer { reading = false }
+        do {
+            try await FaceInstall.read()
+            error = nil
+            load()
+        } catch UploadError.authFailed {
+            // no saved key: the first install from the app binds, the list comes after that
+        } catch {
+            self.error = String(localized: "Couldn't read the faces on the watch: \(error.localizedDescription)")
         }
+    }
+
+    private func load() {
+        let ids = UserDefaults.standard.array(forKey: "faces-on-watch") as? [UInt32] ?? []
+        faces = ids.enumerated().map { DialSlot(id: $1, index: $0) }
+        date = UserDefaults.standard.object(forKey: "faces-on-watch-date") as? Date
+        count = UserDefaults.standard.array(forKey: "faces-on-watch-count") as? [Int]
+        header = UserDefaults.standard.string(forKey: "faces-on-watch-header") ?? ""
     }
 }
 

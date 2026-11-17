@@ -63,11 +63,10 @@ enum FaceInstall {
         return (bin, verdict)
     }
 
-    /// Connects, opens a stock session (a new bind only when the saved key is refused) and uploads.
-    /// `pick`: the watch is full, which dial goes; nil cancels the install.
-    @MainActor static func install(_ bin: Data, seed: String, name: String,
-                                   pick: @MainActor ([DialSlot]) async -> UInt32?,
-                                   progress: @escaping @Sendable (Int) -> Void) async throws {
+    /// Connects and opens a stock session (a new bind only when the saved key is refused, and `bind` allows one:
+    /// it pops up on the watch), then `body`.
+    @MainActor private static func session<T>(bind: Bool = true,
+                                              _ body: (StockSession, String) async throws -> T) async throws -> T {
         // the stock session binds the watch: the RPC listener waits it out
         RPCListener.shared.stop()
         defer { RPCListener.shared.start() }
@@ -90,13 +89,19 @@ enum FaceInstall {
         do {
             guard let saved else { throw UploadError.authFailed }
             try await session.authenticate(k1: saved)
-        } catch UploadError.authFailed, WireError.timeout {
+        } catch UploadError.authFailed where bind, WireError.timeout where bind {
             // no key yet, or the watch was bound again since (Nothing X, a reset): bind, as the site does
             let k1 = try await session.pair(secret: Data(hex: secret ?? "") ?? Data())
             Keychain.set("stock-\(watch)", k1.map { String(format: "%02x", $0) }.joined())
         }
         // a055 comes on its own after auth
         try await Task.sleep(for: .seconds(1.5))
+        return try await body(session, watch)
+    }
+
+    /// What the watch reported in a055, plus the dials this app put there that the list leaves out.
+    private static func dials(_ session: StockSession, _ watch: String) async
+        -> (mine: [UInt32], installed: [UInt32], counted: (count: Int, capacity: Int)?, header: String) {
         let mine = UserDefaults.standard.array(forKey: "dials-\(watch)") as? [UInt32] ?? []
         let reported = await session.reported ?? []
         let installed = reported + mine.filter { !reported.contains($0) }
@@ -105,42 +110,65 @@ enum FaceInstall {
         let header = (await session.dialHeader ?? Data()).map { String(format: "%02x", $0) }.joined(separator: " ")
         Logger(subsystem: "tools.fmc.companion", category: "dials")
             .notice("a055 header \(header, privacy: .public), \(reported.count) listed, \(installed.count) known")
-        let cap = counted?.capacity ?? capacity
-        let full = counted.map { $0.count >= $0.capacity } ?? (installed.count >= capacity)
-        // which dial to replace (ble.ts NoFreeSlotError, slot-dialog.svelte)
-        func ask() async throws -> UInt32 {
-            guard let picked = await pick(installed.enumerated().map { DialSlot(id: $1, index: $0) })
-            else { throw CancellationError() }
-            return picked
-        }
-        // full and not a re-install of this face: ask before sending anything
-        var slot: UInt32?
-        if full, !installed.contains(dialId(seed)) { slot = try await ask() }
-        let id: UInt32
-        do {
-            do {
-                id = try await installFace(session, bin, seed: seed, installed: installed, capacity: cap,
-                                           slot: slot, progress: progress)
-            } catch UploadError.noFreeSlot where slot == nil && !installed.isEmpty {
-                // the count said there was room and the watch said no: the header reading is wrong, or it is missing
-                slot = try await ask()
-                id = try await installFace(session, bin, seed: seed, installed: installed, capacity: cap,
-                                           slot: slot, progress: progress)
-            }
-        } catch UploadError.noFreeSlot {
-            throw FaceInstallError.full
-        }
-        UserDefaults.standard.set(name, forKey: "dial-name-\(id)")
-        let now = mine.filter { $0 != slot } + (mine.contains(id) ? [] : [id])
-        UserDefaults.standard.set(now, forKey: "dials-\(watch)")
-        // what the Watch tab shows: reading it there would need Nothing X closed, an install has it anyway
-        let onWatch = slot.map { s in installed.map { $0 == s ? id : $0 } }
-            ?? (installed.contains(id) ? installed : installed + [id])
+        return (mine, installed, counted, header)
+    }
+
+    /// What the Watch tab shows.
+    private static func remember(_ onWatch: [UInt32], count: Int?, capacity: Int, header: String) {
         UserDefaults.standard.set(onWatch, forKey: "faces-on-watch")
         UserDefaults.standard.set(Date(), forKey: "faces-on-watch-date")
-        let after = counted.map { slot != nil || installed.contains(id) ? $0.count : $0.count + 1 }
-        UserDefaults.standard.set(after.map { [$0, cap] }, forKey: "faces-on-watch-count")
+        UserDefaults.standard.set(count.map { [$0, capacity] }, forKey: "faces-on-watch-count")
         UserDefaults.standard.set(header, forKey: "faces-on-watch-header")
+    }
+
+    /// Reads the dials off the watch for the Watch tab, with the saved key only: no bind popup on a watch this app
+    /// never installed on. Takes the watch from Nothing X, like an install.
+    @MainActor static func read() async throws {
+        try await session(bind: false) { session, watch in
+            let d = await dials(session, watch)
+            remember(d.installed, count: d.counted?.count, capacity: d.counted?.capacity ?? capacity, header: d.header)
+        }
+    }
+
+    /// Uploads `bin`. `pick`: the watch is full, which dial goes; nil cancels the install.
+    @MainActor static func install(_ bin: Data, seed: String, name: String,
+                                   pick: @MainActor ([DialSlot]) async -> UInt32?,
+                                   progress: @escaping @Sendable (Int) -> Void) async throws {
+        try await session { session, watch in
+            let (mine, installed, counted, header) = await dials(session, watch)
+            let cap = counted?.capacity ?? capacity
+            let full = counted.map { $0.count >= $0.capacity } ?? (installed.count >= capacity)
+            // which dial to replace (ble.ts NoFreeSlotError, slot-dialog.svelte)
+            func ask() async throws -> UInt32 {
+                guard let picked = await pick(installed.enumerated().map { DialSlot(id: $1, index: $0) })
+                else { throw CancellationError() }
+                return picked
+            }
+            // full and not a re-install of this face: ask before sending anything
+            var slot: UInt32?
+            if full, !installed.contains(dialId(seed)) { slot = try await ask() }
+            let id: UInt32
+            do {
+                do {
+                    id = try await installFace(session, bin, seed: seed, installed: installed, capacity: cap,
+                                               slot: slot, progress: progress)
+                } catch UploadError.noFreeSlot where slot == nil && !installed.isEmpty {
+                    // the count said there was room and the watch said no: the header reading is wrong, or it is missing
+                    slot = try await ask()
+                    id = try await installFace(session, bin, seed: seed, installed: installed, capacity: cap,
+                                               slot: slot, progress: progress)
+                }
+            } catch UploadError.noFreeSlot {
+                throw FaceInstallError.full
+            }
+            UserDefaults.standard.set(name, forKey: "dial-name-\(id)")
+            let now = mine.filter { $0 != slot } + (mine.contains(id) ? [] : [id])
+            UserDefaults.standard.set(now, forKey: "dials-\(watch)")
+            let onWatch = slot.map { s in installed.map { $0 == s ? id : $0 } }
+                ?? (installed.contains(id) ? installed : installed + [id])
+            remember(onWatch, count: counted.map { slot != nil || installed.contains(id) ? $0.count : $0.count + 1 },
+                     capacity: cap, header: header)
+        }
     }
 }
 
