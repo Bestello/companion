@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -107,7 +108,7 @@ object FirmwareModel {
                 "&fields=id,collectionId,name,kind,version,image,stub,published", token = token)).getJSONArray("items")
             val records = (0 until items.length()).map(items::getJSONObject)
             fun release(kind: String) = records.firstOrNull { it.optString("kind") == kind }?.let {
-                Release(it.optString("name") + if (it.optBoolean("published")) "" else " (draft)", it.optString("version"), it.optLong("stub"),
+                Release(it.optString("name") + if (it.optBoolean("published") || it.optString("name").contains("draft", true)) "" else " (draft)", it.optString("version"), it.optLong("stub"),
                     "$FMC/api/files/${it.getString("collectionId")}/${it.getString("id")}/${it.getString("image")}")
             }
             val loader = release("loader")
@@ -262,12 +263,18 @@ fun FirmwareScreen(model: AppModel, back: () -> Unit) {
                     fm.check?.firmware?.let { fw ->
                         row(fw.name, "${fw.version} · stub ${fw.stub}") {
                             when {
-                                f != null -> LinearProgressIndicator({ (f.percent ?: 0) / 100f }, Modifier.width(80.dp))
+                                f != null -> Text(f.percent?.let { "$it%" } ?: "", color = Fmc.secondary)
                                 offer -> Button({ confirmFlash = true }, enabled = fm.progress == null) {
                                     Text(if (state == null) "Install" else "Update")
                                 }
                                 else -> Text(if (state == null) "" else "Up to date", color = Fmc.secondary)
                             }
+                        }
+                        // the whole row's width: a 57 MB update is long enough to watch
+                        fm.flash?.let { f ->
+                            val p = f.percent
+                            if (p != null) LinearProgressIndicator({ p / 100f }, Modifier.fillMaxWidth().padding(vertical = 8.dp))
+                            else LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 8.dp))
                         }
                         HorizontalDivider()
                     }

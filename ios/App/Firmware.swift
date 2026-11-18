@@ -81,7 +81,7 @@ import WireKit
             let records = try JSONDecoder().decode(Page.self, from: data).items
             func release(_ kind: String) -> Release? {
                 records.first { $0.kind == kind }.map {
-                    Release(name: $0.published ? $0.name : "\($0.name) (draft)", version: $0.version, stub: $0.stub,
+                    Release(name: $0.published || $0.name.localizedCaseInsensitiveContains("draft") ? $0.name : "\($0.name) (draft)", version: $0.version, stub: $0.stub,
                             file: Account.base.appending(path: "api/files/\($0.collectionId)/\($0.id)/\($0.image)"))
                 }
             }
@@ -195,20 +195,26 @@ struct FirmwareView: View {
 
             Section {
                 if let fw = model.check?.firmware {
-                    LabeledContent {
-                        if model.flash != nil {
-                            ProgressView(value: Double(model.flash?.percent ?? 0), total: 100).frame(width: 80)
-                        } else if model.firmwareUpdate(state) || (state == nil && connected) {
-                            Button(state == nil ? "Install" : "Update") { confirmFlash = true }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(model.progress != nil)
-                        } else {
-                            Text(state == nil ? "" : "Up to date").foregroundStyle(.secondary)
+                    VStack(spacing: 10) {
+                        LabeledContent {
+                            if let f = model.flash {
+                                Text(f.percent.map { "\($0)%" } ?? "").monospacedDigit().foregroundStyle(.secondary)
+                            } else if model.firmwareUpdate(state) || (state == nil && connected) {
+                                Button(state == nil ? "Install" : "Update") { confirmFlash = true }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(model.progress != nil)
+                            } else {
+                                Text(state == nil ? "" : "Up to date").foregroundStyle(.secondary)
+                            }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(fw.name)
+                                Text("\(fw.version) · stub \(fw.stub)").font(.footnote).foregroundStyle(.secondary)
+                            }
                         }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(fw.name)
-                            Text("\(fw.version) · stub \(fw.stub)").font(.footnote).foregroundStyle(.secondary)
+                        // the whole row's width: a 57 MB update is long enough to watch
+                        if let f = model.flash {
+                            if let p = f.percent { ProgressView(value: Double(p), total: 100) } else { ProgressView().frame(maxWidth: .infinity) }
                         }
                     }
                 }
