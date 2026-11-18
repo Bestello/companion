@@ -68,6 +68,12 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     val loader get() = (phase as? Phase.Checked)?.state
 
+    /** The last read while a new one runs: lists keep their rows through a refresh. */
+    private var lastLoader by mutableStateOf<LoaderState?>(null)
+    val listedLoader get() = if (phase == Phase.Checking) lastLoader else loader
+    // not Idle: without Bluetooth permission the Apps tab never starts a read
+    val isChecking get() = phase == Phase.Checking
+
     init {
         viewModelScope.launch { AppUpdate.check() }
         viewModelScope.launch {
@@ -84,6 +90,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         } catch (e: Exception) {
             Phase.Failed(e.message ?: "Couldn't read the watch.")
         }
+        lastLoader = loader
     }
 
     suspend fun reload() {

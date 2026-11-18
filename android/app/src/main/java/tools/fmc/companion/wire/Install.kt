@@ -64,3 +64,8 @@ suspend fun install(s: Requester, pkg: ByteArray, progress: (Double) -> Unit): I
     check(s.call(Cmd.END, bytes(0)))
     return slot
 }
+
+/** Removes the app in [slot] with its data (stub DELETE). [InstallError.Busy] while that app runs on the watch. */
+suspend fun remove(s: Requester, slot: Int) {
+    check(s.call(Cmd.DELETE, bytes(slot)))
+}

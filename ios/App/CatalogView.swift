@@ -1,3 +1,4 @@
+import MarkdownUI
 import SwiftUI
 import WireKit
 
@@ -157,7 +158,6 @@ struct AuthorView: View {
                 Text(owner?.name ?? "").font(.title2.bold())
                 Text("\(faces.count) watch faces · \(compact(faces.map(\.downloads).reduce(0, +))) downloads · \(compact(faces.map(catalog.likeCount).reduce(0, +))) likes")
                     .font(.subheadline).foregroundStyle(.secondary)
-                Link("Open on fmc.tools", destination: Account.base.appending(path: "user/\(id)")).font(.subheadline)
             }
             .padding(.top, 8)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
@@ -170,6 +170,11 @@ struct AuthorView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle(owner?.name ?? "")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Link(destination: Account.base.appending(path: "user/\(id)")) { Label("Open on fmc.tools", systemImage: "safari") }
+            }
+        }
         .task { if catalog.all.isEmpty { await catalog.load() } }
     }
 }
@@ -263,16 +268,15 @@ struct FaceDetail: View {
                         FacePreview(url: face.previewURL).frame(maxWidth: 240)
                         VStack(spacing: 4) {
                             Text(face.name).font(.title2.bold()).multilineTextAlignment(.center)
-                            if let author = face.author, let owner = face.ownerId {
-                                // a button in a List row: plain, so only the author is the tap target
-                                NavigationLink(value: "user:\(owner)") {
-                                    HStack(spacing: 8) {
-                                        Avatar(url: face.authorAvatar, name: author, side: 24)
-                                        Text(author).foregroundStyle(.secondary)
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                            }
+                        }
+                        if let other = face.otherDevice {
+                            Label("Made for the \(other). It may not work on the Watch Pro 2.",
+                                  systemImage: "exclamationmark.triangle.fill")
+                                .font(.subheadline)
+                                .foregroundStyle(.orange)
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(.orange.opacity(0.12), in: .rect(cornerRadius: 12))
                         }
                         install(face)
                     }
@@ -283,12 +287,21 @@ struct FaceDetail: View {
                     Text(footer).frame(maxWidth: .infinity)
                 }
                 Section {
+                    if let author = face.author, let owner = face.ownerId {
+                        NavigationLink(value: "user:\(owner)") {
+                            LabeledContent("Author") {
+                                HStack(spacing: 8) {
+                                    Avatar(url: face.authorAvatar, name: author, side: 24)
+                                    Text(author)
+                                }
+                            }
+                        }
+                    }
                     LabeledContent("Downloads", value: "\(face.downloads)")
                     LabeledContent("Likes") { LikeButton(face: face) }
-                    Link(destination: face.pageURL) { Label("Open on fmc.tools", systemImage: "safari") }
                 }
                 if !face.description.isEmpty {
-                    Section("About") { Text(face.description) }
+                    Section("About") { Markdown(face.description).textSelection(.enabled) }
                 }
             } else if let error {
                 ContentUnavailableView("Couldn't load the watch face", systemImage: "exclamationmark.triangle",
@@ -298,6 +311,13 @@ struct FaceDetail: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let face {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Link(destination: face.pageURL) { Label("Open on fmc.tools", systemImage: "safari") }
+                }
+            }
+        }
         .alert("Close Nothing X first", isPresented: $closeNothingX) {
             Button("Install") { Task { await fetchAndInstall() } }
             Button("Cancel", role: .cancel) {}

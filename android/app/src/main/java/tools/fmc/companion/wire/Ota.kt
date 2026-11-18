@@ -112,7 +112,12 @@ suspend fun StockSession.flashFirmware(image: ByteArray, progress: (Int) -> Unit
     inbox.drain()
     send(StockCmd.OTA_BEGIN_REQ, bytes(MARKER))
     val (_, r1) = next(setOf(StockCmd.OTA_BEGIN_REP), 6000)
-    if (r1.firstOrNull()?.toInt() != 1) throw OtaError.Refused("The watch refused the update (${r1.hex()}).")
+    // the watch's 0x9052 handler (cmf-watch-utils decomp FUN_100d343c): 0c battery under 20 %, 0a busy
+    when (r1.firstOrNull()?.toInt()) {
+        1 -> {}
+        0x0C -> throw OtaError.Refused("The watch battery is below 20 %. Charge it and try again.")
+        else -> throw OtaError.Refused("The watch refused the update (${r1.hex()}).")
+    }
     sendOta(StockCmd.OTA_START_REQ, bytes(0x01, 0x00, 0x00, 0x5A))
     val (_, r2) = next(setOf(StockCmd.OTA_START_REP), 5000)
     if (r2.firstOrNull()?.toInt() != 1) throw OtaError.Refused("The watch refused to start (${r2.hex()}).")

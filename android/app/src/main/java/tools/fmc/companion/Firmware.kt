@@ -306,7 +306,10 @@ fun FirmwareScreen(model: AppModel, back: () -> Unit) {
 }
 
 /** One package over K (the loader or an app, into its own slot); the services' listener holds K, so it is off meanwhile. */
-suspend fun kInstall(context: Context, model: AppModel, pkg: ByteArray, progress: (Double) -> Unit) {
+suspend fun kInstall(context: Context, model: AppModel, pkg: ByteArray, progress: (Double) -> Unit) =
+    kRun(context, model) { install(it, pkg, progress) }
+
+suspend fun kRun(context: Context, model: AppModel, body: suspend (KSession) -> Unit) {
     val services = model.services
     if (services) RpcService.stop(context)
     val link = BleLink(context)
@@ -316,7 +319,7 @@ suspend fun kInstall(context: Context, model: AppModel, pkg: ByteArray, progress
             // ponytail: K read fresh each time (a few seconds) rather than trying the cached one first
             val (session, secret) = KSession.open(link, register = false)
             model.store["k-${link.watchId}"] = secret
-            install(session, pkg, progress)
+            body(session)
         }
     } finally {
         link.disconnect()

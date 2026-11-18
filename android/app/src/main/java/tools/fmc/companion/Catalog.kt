@@ -13,7 +13,12 @@ data class Watchface(
     val id: String, val collectionId: String, val name: String, val description: String, val preview: String,
     val bin: String, val published: Boolean, val downloads: Int, val author: String?,
     val created: String = "", val type: String = "", val authorAvatar: String? = null, val ownerId: String? = null,
+    /** "watch_pro_2", "watch_3_pro", …; "" for most, which count as Watch Pro 2 (the site's matchesDevice) */
+    val device: String = "",
 ) {
+    /** Made for another watch: the name to warn with, null for the Watch Pro 2 and untagged faces. */
+    val otherDevice get() = device.takeIf { it.isNotEmpty() && it != "watch_pro_2" }?.let { DEVICES[it] ?: it }
+
     val previewURL get() = file(preview)
     val binURL get() = file(bin)
     val pageURL get() = "$FMC/market/$id"
@@ -30,7 +35,11 @@ data class Watchface(
                 o.optString("avatar").takeIf { it.isNotEmpty() }?.let { "$FMC/api/files/users/${o.getString("id")}/$it?thumb=100x100" }
             },
             j.optString("owner").takeIf { it.isNotEmpty() },
+            j.optString("device"),
         )
+
+        /** fmc_frontend deviceLabel */
+        val DEVICES = mapOf("watch_pro" to "Watch Pro", "watch_3_pro" to "Watch 3 Pro")
     }
 }
 
@@ -61,8 +70,8 @@ object Catalog {
         http("DELETE", "$LIKES/$id", token = token)
     }
 
-    /** Published faces for the Watch Pro 2. Untagged ones count, as the site's matchesDevice: most predate `device`. */
-    suspend fun all() = list("published = true && (device = '' || device = 'watch_pro_2')", "-created")
+    /** Every published face, for any watch: a face for another one says so on its page (`otherDevice`). */
+    suspend fun all() = list("published = true", "-created")
 
     /** The signed-in user's own faces, drafts included (loadMyFx). */
     suspend fun mine(userId: String, token: String?) =

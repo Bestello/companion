@@ -26,7 +26,17 @@ struct Watchface: Decodable, Identifiable, Hashable {
     var created: String
     /// "Analog", "Digital", …; "" for most
     var type: String?
+    /// "watch_pro_2", "watch_3_pro", …; "" for most, which count as Watch Pro 2 (the site's matchesDevice)
+    var device: String?
     var expand: Expand?
+
+    /// Made for another watch: the name to warn with, nil for the Watch Pro 2 and untagged faces.
+    var otherDevice: String? {
+        guard let d = device, !d.isEmpty, d != "watch_pro_2" else { return nil }
+        return Self.devices[d] ?? d
+    }
+    /// fmc_frontend deviceLabel
+    static let devices = ["watch_pro": "Watch Pro", "watch_3_pro": "Watch 3 Pro"]
 
     var author: String? { expand?.owner?.name }
     var authorAvatar: URL? { expand?.owner?.avatarURL }
@@ -41,8 +51,7 @@ struct Watchface: Decodable, Identifiable, Hashable {
 }
 
 @MainActor @Observable final class Catalog {
-    /// Published faces for the Watch Pro 2. Untagged ones count as Watch Pro 2, as the site's
-    /// matchesDevice does: most of the catalog predates the `device` field.
+    /// Every published face, for any watch: a face for another one says so on its page (`otherDevice`).
     private(set) var all: [Watchface] = []
     /// The signed-in user's own faces, drafts included (loadMyFx).
     private(set) var mine: [Watchface] = []
@@ -84,7 +93,7 @@ struct Watchface: Decodable, Identifiable, Hashable {
 
     func load() async {
         do {
-            all = try await Self.list(filter: "published = true && (device = '' || device = 'watch_pro_2')", sort: "-created")
+            all = try await Self.list(filter: "published = true", sort: "-created")
             error = nil
         } catch {
             if !Self.cancelled(error) { self.error = error.localizedDescription }

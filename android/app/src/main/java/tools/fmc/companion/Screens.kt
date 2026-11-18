@@ -1,5 +1,16 @@
 package tools.fmc.companion
 
+import com.mikepenz.markdown.m3.Markdown
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -311,7 +322,11 @@ fun AuthorScreen(model: AppModel, id: String, open: (String) -> Unit, back: () -
     val faces = model.all.filter { it.ownerId == id }.sortedByDescending { it.created }
     val first = faces.firstOrNull()
     Column {
-        Bar(first?.author ?: "", back)
+        Bar(first?.author ?: "", back) {
+            IconButton({ context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("$FMC/user/$id"))) }) {
+                Icon(painterResource(R.drawable.ic_open_in_new), "Open on fmc.tools")
+            }
+        }
         LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -321,7 +336,6 @@ fun AuthorScreen(model: AppModel, id: String, open: (String) -> Unit, back: () -
                     Text(first?.author ?: "", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text("${faces.size} watch faces · ${compact(faces.sumOf { it.downloads })} downloads · " +
                         "${compact(faces.sumOf { model.likeCount(it) })} likes", color = Fmc.secondary)
-                    TextButton({ context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("$FMC/user/$id"))) }) { Text("Open on fmc.tools") }
                 }
             }
             items(faces, key = { it.id }) { face -> FaceCard(model, face) { open(face.id) } }
@@ -469,7 +483,13 @@ fun FaceScreen(model: AppModel, id: String, author: (String) -> Unit = {}, back:
     }
 
     Column {
-        Bar(face?.name ?: "", back)
+        Bar(face?.name ?: "", back) {
+            face?.let { f ->
+                IconButton({ context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(f.pageURL))) }) {
+                    Icon(painterResource(R.drawable.ic_open_in_new), "Open on fmc.tools")
+                }
+            }
+        }
         LazyColumn {
             val f = face
             when {
@@ -480,13 +500,11 @@ fun FaceScreen(model: AppModel, id: String, author: (String) -> Unit = {}, back:
                             FacePreview(f.previewURL, Modifier.widthIn(max = 240.dp).fillMaxWidth())
                             Text(f.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,
                                 textAlign = TextAlign.Center)
-                            f.author?.let { name ->
-                                Row(Modifier.clip(CircleShape).clickable(enabled = f.ownerId != null) { f.ownerId?.let(author) }
-                                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Avatar(f.authorAvatar, name, 24.dp)
-                                    Text(name, color = Fmc.secondary)
-                                }
+                            f.otherDevice?.let { other ->
+                                Text("⚠ Made for the $other. It may not work on the Watch Pro 2.", color = Fmc.warning,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                                        .background(Fmc.warning.copy(alpha = 0.12f)).padding(12.dp))
                             }
                             val p = progress
                             if (p != null) {
@@ -503,16 +521,22 @@ fun FaceScreen(model: AppModel, id: String, author: (String) -> Unit = {}, back:
                     }
                     item {
                         Section {
+                            f.author?.let { name ->
+                                Row(Modifier.fillMaxWidth().clickable(enabled = f.ownerId != null) { f.ownerId?.let(author) },
+                                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("Author", Modifier.weight(1f))
+                                    Avatar(f.authorAvatar, name, 24.dp)
+                                    Text(name, color = Fmc.secondary)
+                                    Text("›", color = Fmc.secondary)
+                                }
+                                HorizontalDivider()
+                            }
                             Row { Text("Downloads", Modifier.weight(1f)); Text("${f.downloads}", color = Fmc.secondary) }
                             HorizontalDivider()
                             Row(verticalAlignment = Alignment.CenterVertically) { Text("Likes", Modifier.weight(1f)); LikeButton(model, f) }
-                            HorizontalDivider()
-                            Text("Open on fmc.tools", Modifier.fillMaxWidth().clickable {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(f.pageURL)))
-                            })
                         }
                     }
-                    if (f.description.isNotEmpty()) item { Section("About") { Text(f.description) } }
+                    if (f.description.isNotEmpty()) item { Section("About") { SelectionContainer { Markdown(f.description) } } }
                 }
                 error != null -> item {
                     Text("Couldn't load the watch face\n$error", Modifier.fillMaxWidth().padding(32.dp),

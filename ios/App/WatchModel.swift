@@ -19,14 +19,25 @@ import WireKit
         if case .checked(let s) = phase { s } else { nil }
     }
 
+    /// The last read while a new one runs: lists keep their rows through a refresh.
+    private(set) var lastLoader: LoaderState?
+    var listedLoader: LoaderState? {
+        if case .checking = phase { lastLoader } else { loader }
+    }
+    var isChecking: Bool {
+        switch phase { case .idle, .checking: true; default: false }
+    }
+
     func check() async {
         phase = .checking
         do {
             let state = try await read()
             phase = .checked(state)
+            lastLoader = state
             RPCListener.shared.update(state)
         } catch {
             phase = .failed(error.localizedDescription)
+            lastLoader = nil
         }
     }
 

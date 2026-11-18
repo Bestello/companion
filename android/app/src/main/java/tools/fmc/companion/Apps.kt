@@ -1,6 +1,15 @@
 package tools.fmc.companion
 
 import android.content.Context
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.background
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.foundation.layout.width
@@ -109,8 +118,12 @@ class WatchApp(val name: String, val header: PackageHeader? = null, val slot: In
 fun versionText(v: Long) = if (v >= 1024) "${v shr 20}.${v shr 10 and 1023}.${v and 1023}" else "$v"
 
 object StoreApps {
-    class Listing(val id: String, val slug: String, val name: String, val icon: String?, val pkg: String?) {
+    class Listing(val id: String, val slug: String, val name: String, val icon: String?, val pkg: String?,
+                  val summary: String = "", val description: String = "", val author: String = "", val version: String = "",
+                  val abi: String = "", val source: String = "", val downloads: Int = 0, val screenshots: List<String> = emptyList()) {
         val page get() = "$FMC/apps/$id"
+        /** The download hook: counts the install as a download and redirects to the package. */
+        val download get() = "$FMC/api/apps/$id/download"
     }
 
     private var byKey by mutableStateOf<Map<String, Listing>>(emptyMap())
@@ -119,7 +132,8 @@ object StoreApps {
 
     /** By name, for the All segment. */
     val all get() = byKey.values.distinct().sortedBy { it.name.lowercase() }
-    private var loaded = false
+    var loaded by mutableStateOf(false)
+        private set
 
     fun listing(pkg: String) = byKey[pkg.lowercase()]
     fun latest(pkg: String) = listing(pkg)?.let { headers[it.slug] }
@@ -128,7 +142,7 @@ object StoreApps {
         if (loaded) return
         val filter = URLEncoder.encode("published = true", "UTF-8")
         val body = runCatching {
-            http("GET", "$FMC/api/collections/apps/records?filter=$filter&perPage=200&fields=id,collectionId,slug,name,icon,package")
+            http("GET", "$FMC/api/collections/apps/records?filter=$filter&perPage=200&fields=id,collectionId,slug,name,icon,package,summary,description,author,version,abi,source,downloads,screenshots")
         }.getOrNull() ?: return
         byKey = parse(body)
         loaded = true
@@ -151,7 +165,10 @@ object StoreApps {
             val files = "$FMC/api/files/${r.getString("collectionId")}/${r.getString("id")}"
             val url = if (icon.isEmpty() || icon.endsWith(".svg", ignoreCase = true)) null else "$files/$icon"
             val pkg = r.optString("package").takeIf { it.isNotEmpty() }?.let { "$files/$it" }
-            val l = Listing(r.getString("id"), r.getString("slug"), r.getString("name"), url, pkg)
+            val shots = r.optJSONArray("screenshots")?.let { a -> (0 until a.length()).map { "$files/${a.getString(it)}" } }.orEmpty()
+            val l = Listing(r.getString("id"), r.getString("slug"), r.getString("name"), url, pkg, r.optString("summary"),
+                r.optString("description"), r.optString("author"), r.optString("version"), r.optString("abi"),
+                r.optString("source"), r.optInt("downloads"), shots)
             out[r.getString("slug").lowercase()] = l
             out[r.getString("name").lowercase()] = l
         }
@@ -229,7 +246,10 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit) {
     }
     var showAll by remember { mutableStateOf(false) }
     // Installed is the watch's list: nothing until it is read, not the apps that only asked for something
-    val apps = if (showAll) WatchApp.store(model.loader, grants) else if (model.loader == null) emptyList() else WatchApp.all(model.loader, grants)
+    val loader = model.listedLoader
+    val apps = if (showAll) WatchApp.store(loader, grants) else if (loader == null) emptyList() else WatchApp.all(loader, grants)
+    // first load: placeholder rows; a refresh keeps the rows it has
+    val loading = apps.isEmpty() && if (showAll) !StoreApps.loaded else model.isChecking
     Column {
         Bar("Apps")
         LazyColumn {
@@ -247,21 +267,38 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit) {
                     list.forEachIndexed { i, app ->
                         if (i > 0) HorizontalDivider()
                         NavRow(app.title, app.detail, grants.pendingCount(app.name), { open(app.name) },
-                            trailing = if (app.slot != null && app.update != null) {{ UpdateButton(model, app.name) }} else null) { AppIcon(app.name) }
+                            trailing = if (app.update != null || (app.slot == null && StoreApps.listing(app.name)?.pkg != null)) {{ GetButton(model, app) }}
+                                else if (showAll && app.slot != null) {{ Text("Installed", color = Fmc.secondary, fontWeight = FontWeight.SemiBold,
+                                    style = MaterialTheme.typography.bodySmall) }} else null) { AppIcon(app.name) }
                     }
                 }
             }
             val (updates, current) = on.partition { it.update != null }
-            if (showAll) { if (apps.isNotEmpty()) group("FMC store", apps) }
+            if (showAll) { if (apps.isNotEmpty()) group("FMC store", apps, if (model.listedLoader == null) "Connect on the Watch tab to install apps." else null) }
             else {
                 if (updates.isNotEmpty()) group("Updates", updates, "Updates install over Bluetooth. Keep the app closed on the watch meanwhile.")
                 if (current.isNotEmpty()) group("On the watch", current)
             }
             if (!showAll && off.isNotEmpty()) {
-                if (model.loader == null) group("Asked for permissions", off, "Connect on the Watch tab to see every app on the watch.")
+                if (model.listedLoader == null) group("Asked for permissions", off, "Connect on the Watch tab to see every app on the watch.")
                 else group("Not on the watch", off)
             }
-            if (apps.isEmpty()) item {
+            if (loading) item {
+                Section {
+                    repeat(6) { i ->
+                        if (i > 0) HorizontalDivider()
+                        Row(Modifier.padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            val tone = Fmc.secondary.copy(alpha = 0.15f)
+                            Box(Modifier.size(40.dp).clip(CircleShape).background(tone))
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Box(Modifier.width(140.dp).height(14.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(4.dp)).background(tone))
+                                Box(Modifier.width(100.dp).height(10.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(4.dp)).background(tone))
+                            }
+                        }
+                    }
+                }
+            } else if (apps.isEmpty()) item {
                 Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("No apps", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -292,33 +329,84 @@ fun AppScreen(model: AppModel, name: String, back: () -> Unit) {
     fun openSettings() = context.startActivity(
         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)))
 
-    val app = WatchApp.all(model.loader, grants).firstOrNull { it.name == name } ?: WatchApp(name)
+    val app = WatchApp.all(model.listedLoader, grants).firstOrNull { it.name == name } ?: WatchApp(name)
+    val listing = StoreApps.listing(name)
     val caps = grants.caps(name)
     val allowed = grants.of(name)
     val offInOs = caps.filter { allowed[it] == true && !osAllows(context, it) }
     Column {
-        Bar(app.title, back)
-        LazyColumn {
-            item {
-                Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AppIcon(name, 72.dp)
-                    Text(app.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Text(app.detail, color = Fmc.secondary)
+        Bar(app.title, back) {
+            listing?.let { l ->
+                IconButton({ context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(l.page))) }) {
+                    Icon(painterResource(R.drawable.ic_open_in_new), "Open on fmc.tools")
                 }
             }
-            app.update?.let { new ->
-                item {
-                    Section {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Version ${versionText(new.version)} is out", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                            UpdateButton(model, name)
-                        }
-                        HorizontalDivider()
-                        Text("Open on fmc.tools", Modifier.fillMaxWidth().clickable {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(StoreApps.listing(name)!!.page)))
-                        })
+        }
+        LazyColumn {
+            // the App Store's header: icon, name, summary, the button
+            item {
+                Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    AppIcon(name, 108.dp)
+                    Column(Modifier.weight(1f).heightIn(min = 108.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(app.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, maxLines = 2)
+                        if (!listing?.summary.isNullOrEmpty()) Text(listing!!.summary, color = Fmc.secondary,
+                            style = MaterialTheme.typography.bodyMedium, maxLines = 3)
+                        androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+                        if (listing != null || app.slot != null) GetButton(model, app, large = true)
+                        if (listing?.pkg != null && model.listedLoader == null) Text("Connect on the Watch tab to install.",
+                            style = MaterialTheme.typography.bodySmall, color = Fmc.secondary)
                     }
+                }
+            }
+            if (listing != null) {
+                item { Column { InfoStrip(app, listing) } }
+                if (listing.screenshots.isNotEmpty()) item {
+                    androidx.compose.foundation.lazy.LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(listing.screenshots.size) { i ->
+                            val img = rememberImage(listing.screenshots[i])
+                            Box(Modifier.size(180.dp).clip(CircleShape).background(Fmc.secondary.copy(alpha = 0.15f))) {
+                                img?.let { Image(it, null, Modifier.size(180.dp), contentScale = ContentScale.Crop) }
+                            }
+                        }
+                    }
+                }
+                if (listing.description.isNotEmpty()) item {
+                    Section("Description") { SelectionContainer { com.mikepenz.markdown.m3.Markdown(listing.description) } }
+                }
+                item {
+                    Section("Information") {
+                        val rows = buildList {
+                            if (listing.author.isNotEmpty()) add("Developer" to listing.author)
+                            if (listing.version.isNotEmpty()) add("Version" to listing.version)
+                            app.header?.let { h -> add("On the watch" to "${versionText(h.version)} · slot ${app.slot}") }
+                            if (listing.abi.isNotEmpty()) add("Loader ABI" to listing.abi)
+                        }
+                        rows.forEachIndexed { i, (k, v) ->
+                            if (i > 0) HorizontalDivider()
+                            Row { Text(k, Modifier.weight(1f)); Text(v, color = Fmc.secondary) }
+                        }
+                        if (listing.source.isNotEmpty()) {
+                            if (rows.isNotEmpty()) HorizontalDivider()
+                            Row(Modifier.fillMaxWidth().clickable {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(listing.source)))
+                            }, verticalAlignment = Alignment.CenterVertically) {
+                                Text("Source code", Modifier.weight(1f))
+                                Icon(painterResource(R.drawable.ic_open_in_new), null, tint = Fmc.secondary)
+                            }
+                        }
+                    }
+                }
+            } else item { Section { Row { Text("On the watch", Modifier.weight(1f)); Text(app.detail, color = Fmc.secondary) } } }
+            app.slot?.let { slot ->
+                item {
+                    var confirm by remember { mutableStateOf(false) }
+                    val scope = rememberCoroutineScope()
+                    Section(footer = "Removes ${app.title} and its data from the watch.") {
+                        Text("Delete from the Watch", Modifier.fillMaxWidth().clickable(enabled = name !in AppUpdates.progress) { confirm = true },
+                            color = Fmc.danger)
+                    }
+                    if (confirm) DeleteDialog(app, { confirm = false }) { scope.launch { AppUpdates.remove(context, model, name, slot) } }
                 }
             }
             if (caps.isEmpty()) item {
@@ -396,43 +484,115 @@ private fun CapTile(cap: String) = when (cap) {
     else -> IconTile(painterResource(R.drawable.ic_public), Color(0xFF757575))
 }
 
-/** Store updates for the apps on the watch: the new package over K into the app's own slot. */
+/** Store installs and updates: the package over K into the app's own slot, else the first free one. */
 object AppUpdates {
     /** name → 0…1 while installing */
     val progress = androidx.compose.runtime.mutableStateMapOf<String, Double>()
     var error by mutableStateOf<String?>(null)
 
     suspend fun update(context: Context, model: AppModel, name: String) {
-        val url = StoreApps.listing(name)?.pkg ?: return
+        val listing = StoreApps.listing(name)?.takeIf { it.pkg != null } ?: return
         if (name in progress) return
         progress[name] = 0.0
         try {
-            val pkg = download(url)
+            val pkg = download(listing.download)
             kInstall(context, model, pkg) { progress[name] = it }
-            DevLog.log(context, "$name updated")
+            DevLog.log(context, "$name installed")
             model.check()
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (_: tools.fmc.companion.wire.InstallError.Busy) {
-            error = "$name or the Apps menu is open on the watch. Go back to the watch face, then try again."
+            error = "${listing.name} or the Apps menu is open on the watch. Go back to the watch face, then try again."
+        } catch (_: tools.fmc.companion.wire.InstallError.NoFreeSlot) {
+            error = "All 8 app slots on the watch are taken."
         } catch (e: Exception) {
-            error = "Couldn't update $name: ${e.message}"
+            error = "Couldn't install ${listing.name}: ${e.message}"
+        } finally {
+            progress.remove(name)
+        }
+    }
+
+    suspend fun remove(context: Context, model: AppModel, name: String, slot: Int) {
+        if (name in progress) return
+        val title = StoreApps.listing(name)?.name ?: name
+        progress[name] = 0.0
+        try {
+            kRun(context, model) { tools.fmc.companion.wire.remove(it, slot) }
+            DevLog.log(context, "$name removed from slot $slot")
+            model.check()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: tools.fmc.companion.wire.InstallError.Busy) {
+            error = "$title or the Apps menu is open on the watch. Go back to the watch face, then try again."
+        } catch (e: Exception) {
+            error = "Couldn't delete $title: ${e.message}"
         } finally {
             progress.remove(name)
         }
     }
 }
 
-/** Update, or the progress while it installs; failures show as a dialog. */
 @Composable
-fun UpdateButton(model: AppModel, name: String) {
+fun DeleteDialog(app: WatchApp, dismiss: () -> Unit, delete: () -> Unit) = AlertDialog(onDismissRequest = dismiss,
+    title = { Text("Delete ${app.title} from the watch?") }, text = { Text("Its data on the watch goes too.") },
+    confirmButton = { TextButton({ dismiss(); delete() }) { Text("Delete", color = Fmc.danger) } },
+    dismissButton = { TextButton(dismiss) { Text("Cancel") } })
+
+/** The App Store's button: Get, Update or Delete, and the progress while it installs; failures show as a dialog. */
+@Composable
+fun GetButton(model: AppModel, app: WatchApp, large: Boolean = false) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val p = AppUpdates.progress[name]
-    if (p != null) LinearProgressIndicator({ p.toFloat() }, Modifier.width(60.dp))
-    else TextButton({ scope.launch { AppUpdates.update(context, model, name) } }) { Text("Update") }
+    val p = AppUpdates.progress[app.name]
+    val width = if (large) 84.dp else 72.dp
+    when {
+        p != null -> LinearProgressIndicator({ p.toFloat() }, Modifier.width(width))
+        app.slot != null && app.update == null -> {
+            var confirm by remember { mutableStateOf(false) }
+            androidx.compose.material3.OutlinedButton({ confirm = true }, Modifier.widthIn(min = width).height(if (large) 36.dp else 30.dp),
+                colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(contentColor = Fmc.danger),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp)) {
+                Text("Delete", fontWeight = FontWeight.Bold)
+            }
+            if (confirm) DeleteDialog(app, { confirm = false }) { scope.launch { AppUpdates.remove(context, model, app.name, app.slot) } }
+        }
+        else -> androidx.compose.material3.Button({ scope.launch { AppUpdates.update(context, model, app.name) } },
+            Modifier.widthIn(min = width).height(if (large) 36.dp else 30.dp),
+            enabled = model.loader != null && StoreApps.listing(app.name)?.pkg != null,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp)) {
+            Text(if (app.slot == null) "Get" else "Update", fontWeight = FontWeight.Bold)
+        }
+    }
     AppUpdates.error?.let {
-        AlertDialog(onDismissRequest = { AppUpdates.error = null }, title = { Text("Couldn't update") },
+        AlertDialog(onDismissRequest = { AppUpdates.error = null }, title = { Text("Couldn't install") },
             text = { Text(it) }, confirmButton = { TextButton({ AppUpdates.error = null }) { Text("OK") } })
     }
+}
+
+/** The App Store's row of facts under the header. */
+@Composable
+private fun ColumnScope.InfoStrip(app: WatchApp, listing: StoreApps.Listing) {
+    @Composable
+    fun cell(title: String, value: String, caption: String? = null) =
+        Column(Modifier.width(104.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, style = MaterialTheme.typography.labelSmall, color = Fmc.secondary, fontWeight = FontWeight.SemiBold)
+            Text(value, Modifier.height(30.dp), style = MaterialTheme.typography.titleLarge, color = Fmc.secondary, fontWeight = FontWeight.Bold, maxLines = 1)
+            caption?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Fmc.secondary, maxLines = 1) }
+        }
+    HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+    Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 8.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.Top) {
+        val cells = buildList<@Composable () -> Unit> {
+            add { cell("DOWNLOADS", compact(listing.downloads)) }
+            if (listing.version.isNotEmpty()) add { cell("VERSION", listing.version) }
+            if (listing.author.isNotEmpty()) add { cell("DEVELOPER", "👤", listing.author) }
+            app.slot?.let { add { cell("SLOT", "$it", "on the watch") } }
+            if (listing.abi.isNotEmpty()) add { cell("ABI", listing.abi) }
+        }
+        cells.forEachIndexed { i, c ->
+            if (i > 0) androidx.compose.material3.VerticalDivider(Modifier.padding(top = 10.dp).height(36.dp))
+            c()
+        }
+    }
+    HorizontalDivider(Modifier.padding(horizontal = 16.dp))
 }

@@ -135,7 +135,11 @@ extension StockSession {
         await inbox.drain()
         try await send(StockCmd.otaBeginReq, Data([marker]))
         let (_, r1) = try await next([StockCmd.otaBeginRep], timeout: .seconds(6))
-        guard r1.first == 1 else { throw OtaError.refused("The watch refused the update (\(r1.hexString)).") }
+        // the watch's 0x9052 handler (cmf-watch-utils decomp FUN_100d343c): 0c battery under 20 %, 0a busy
+        guard r1.first == 1 else {
+            throw OtaError.refused(r1.first == 0x0C ? "The watch battery is below 20 %. Charge it and try again."
+                                   : "The watch refused the update (\(r1.hexString)).")
+        }
         try await sendOta(StockCmd.otaStartReq, Data([0x01, 0x00, 0x00, 0x5A]))
         let (_, r2) = try await next([StockCmd.otaStartRep], timeout: .seconds(5))
         guard r2.first == 1 else { throw OtaError.refused("The watch refused to start (\(r2.hexString)).") }

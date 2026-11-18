@@ -134,6 +134,15 @@ import WireKit
 
     /// One package over K (the loader or an app, into its own slot), with the RPC listener off meanwhile.
     static func install(_ pkg: Data, progress: @escaping @Sendable (Double) -> Void) async throws {
+        try await k { _ = try await WireKit.install($0, package: pkg, progress: progress) }
+    }
+
+    static func remove(slot: Int) async throws {
+        try await k { try await WireKit.remove($0, slot: slot) }
+    }
+
+    /// One K session of its own; the services' listener holds K, so it is off meanwhile.
+    private static func k(_ body: @escaping @Sendable (any Requester) async throws -> Void) async throws {
         RPCListener.shared.stop()
         defer { RPCListener.shared.start() }
         let link = BLELink()
@@ -141,7 +150,7 @@ import WireKit
         try await link.connect()
         try await KLock.shared.run {
             let (session, _) = try await WatchModel.open(link)
-            _ = try await WireKit.install(session, package: pkg, progress: progress)
+            try await body(session)
         }
     }
 

@@ -1,3 +1,4 @@
+import MarkdownUI
 import SwiftUI
 import WireKit
 
@@ -91,14 +92,19 @@ func versionText(_ v: UInt32) -> String { v >= 1024 ? "\(v >> 20).\(v >> 10 & 10
     struct Listing {
         let id, slug, name: String
         let icon, package: URL?
+        var summary = "", description = "", author = "", version = "", abi = "", source = "", updated = ""
+        var downloads = 0
+        var screenshots: [URL] = []
         var page: URL { Account.base.appending(path: "apps/\(id)") }
+        /// The download hook: counts the install as a download and redirects to the package.
+        var download: URL { Account.base.appending(path: "api/apps/\(id)/download") }
     }
     private(set) var byKey: [String: Listing] = [:]
     /// slug → the store package's header. Its u32 version, not the listing's text: SDK examples don't encode it.
     private(set) var headers: [String: PackageHeader] = [:]
     /// By name, for the All segment.
     private(set) var all: [Listing] = []
-    private var loaded = false
+    private(set) var loaded = false
 
     func listing(_ package: String) -> Listing? { byKey[package.lowercased()] }
     func latest(_ package: String) -> PackageHeader? { listing(package).flatMap { headers[$0.slug] } }
@@ -106,10 +112,15 @@ func versionText(_ v: UInt32) -> String { v >= 1024 ? "\(v >> 20).\(v >> 10 & 10
     func load() async {
         guard !loaded else { return }
         struct Page: Decodable { var items: [Record] }
-        struct Record: Decodable { var id, collectionId, slug, name, icon: String; var package: String? }
+        struct Record: Decodable {
+            var id, collectionId, slug, name, icon: String
+            var package, summary, description, author, version, abi, source, updated: String?
+            var downloads: Int?
+            var screenshots: [String]?
+        }
         var url = Account.base.appending(path: "api/collections/apps/records")
         url.append(queryItems: [.init(name: "filter", value: "published = true"), .init(name: "perPage", value: "200"),
-                                .init(name: "fields", value: "id,collectionId,slug,name,icon,package")])
+                                .init(name: "fields", value: "id,collectionId,slug,name,icon,package,summary,description,author,version,abi,source,updated,downloads,screenshots")])
         guard let (data, _) = try? await URLSession.shared.data(from: url),
               let page = try? JSONDecoder().decode(Page.self, from: data) else { return }
         loaded = true
@@ -118,7 +129,10 @@ func versionText(_ v: UInt32) -> String { v >= 1024 ? "\(v >> 20).\(v >> 10 & 10
             let files = Account.base.appending(path: "api/files/\(r.collectionId)/\(r.id)")
             let icon = r.icon.isEmpty || r.icon.hasSuffix(".svg") ? nil : files.appending(path: r.icon)
             let package = r.package.flatMap { $0.isEmpty ? nil : files.appending(path: $0) }
-            let l = Listing(id: r.id, slug: r.slug, name: r.name, icon: icon, package: package)
+            let l = Listing(id: r.id, slug: r.slug, name: r.name, icon: icon, package: package, summary: r.summary ?? "",
+                            description: r.description ?? "", author: r.author ?? "", version: r.version ?? "",
+                            abi: r.abi ?? "", source: r.source ?? "", updated: r.updated ?? "", downloads: r.downloads ?? 0,
+                            screenshots: (r.screenshots ?? []).map { files.appending(path: $0) })
             byKey[r.slug.lowercased()] = l
             byKey[r.name.lowercased()] = l
             all.append(l)
@@ -198,7 +212,7 @@ struct AppsTab: View {
     }
 }
 
-/// Store updates for the apps on the watch: the new package over K into the app's own slot.
+/// Store installs and updates: the package over K into the app's own slot, else the first free one.
 @MainActor @Observable final class AppUpdates {
     static let shared = AppUpdates()
     /// name → 0…1 while installing
@@ -206,33 +220,67 @@ struct AppsTab: View {
     var error: String?
 
     func update(_ name: String, _ watch: WatchModel) async {
-        guard progress[name] == nil, let url = StoreApps.shared.listing(name)?.package else { return }
+        guard progress[name] == nil, let listing = StoreApps.shared.listing(name), listing.package != nil else { return }
         progress[name] = 0
         defer { progress[name] = nil }
         do {
-            let (pkg, _) = try await URLSession.shared.data(from: url)
+            let (pkg, _) = try await URLSession.shared.data(from: listing.download)
             try await FirmwareModel.install(pkg) { p in Task { @MainActor in self.progress[name] = p } }
-            DevLog.shared.log("\(name) updated")
+            DevLog.shared.log("\(name) installed")
             await watch.check()
         } catch InstallError.busy {
-            error = String(localized: "\(name) or the Apps menu is open on the watch. Go back to the watch face, then try again.")
+            error = String(localized: "\(listing.name) or the Apps menu is open on the watch. Go back to the watch face, then try again.")
+        } catch InstallError.noFreeSlot {
+            error = String(localized: "All 8 app slots on the watch are taken.")
         } catch {
-            self.error = String(localized: "Couldn't update \(name): \(error.localizedDescription)")
+            self.error = String(localized: "Couldn't install \(listing.name): \(error.localizedDescription)")
         }
     }
 }
 
-/// Update, or the progress while it installs.
-struct UpdateButton: View {
+extension AppUpdates {
+    func remove(_ name: String, slot: Int, _ watch: WatchModel) async {
+        guard progress[name] == nil else { return }
+        let title = StoreApps.shared.listing(name)?.name ?? name
+        progress[name] = 0
+        defer { progress[name] = nil }
+        do {
+            try await FirmwareModel.remove(slot: slot)
+            DevLog.shared.log("\(name) removed from slot \(slot)")
+            await watch.check()
+        } catch InstallError.busy {
+            error = String(localized: "\(title) or the Apps menu is open on the watch. Go back to the watch face, then try again.")
+        } catch {
+            self.error = String(localized: "Couldn't delete \(title): \(error.localizedDescription)")
+        }
+    }
+}
+
+/// The App Store's button: Get, Update or Delete, and the progress while it installs.
+struct GetButton: View {
     @Environment(WatchModel.self) private var watch
-    let name: String
+    let app: WatchApp
+    var large = false
+    @State private var deleting = false
 
     var body: some View {
-        if let p = AppUpdates.shared.progress[name] {
-            ProgressView(value: p).frame(width: 60)
+        let width: CGFloat = large ? 84 : 72
+        if let p = AppUpdates.shared.progress[app.name] {
+            ProgressView(value: p).frame(width: width)
+        } else if let slot = app.slot, app.update == nil {
+            Button(role: .destructive) { deleting = true } label: {
+                Text("Delete").fontWeight(.bold).frame(minWidth: width - 24)
+            }
+            .buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(large ? .regular : .small).tint(.red)
+            .confirmationDialog("Delete \(app.title) from the watch?", isPresented: $deleting, titleVisibility: .visible) {
+                Button("Delete", role: .destructive) { Task { await AppUpdates.shared.remove(app.name, slot: slot, watch) } }
+            } message: { Text("Its data on the watch goes too.") }
         } else {
-            Button("Update") { Task { await AppUpdates.shared.update(name, watch) } }
-                .buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.small)
+            Button { Task { await AppUpdates.shared.update(app.name, watch) } } label: {
+                Text(app.slot == nil ? "Get" : "Update").fontWeight(.bold).frame(minWidth: width - 24)
+            }
+            .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).controlSize(large ? .regular : .small)
+            .disabled(watch.loader == nil || StoreApps.shared.listing(app.name)?.package == nil)
         }
     }
 }
@@ -244,7 +292,10 @@ struct AppsView: View {
 
     var body: some View {
         // Installed is the watch's list: nothing until it is read, not the apps that only asked for something
-        let apps = showAll ? WatchApp.store(watch.loader, perms) : watch.loader == nil ? [] : WatchApp.all(watch.loader, perms)
+        let loader = watch.listedLoader
+        let apps = showAll ? WatchApp.store(loader, perms) : loader == nil ? [] : WatchApp.all(loader, perms)
+        // first load: placeholder rows; a refresh keeps the rows it has
+        let loading = apps.isEmpty && (showAll ? !StoreApps.shared.loaded : watch.isChecking)
         List {
             Section {
                 Picker("Show", selection: $showAll) {
@@ -255,14 +306,29 @@ struct AppsView: View {
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
             }
-            if showAll {
-                Section { ForEach(apps) { row($0) } } footer: { Text("Apps in the FMC store.") }
+            if loading {
+                Section {
+                    ForEach(0..<6, id: \.self) { _ in
+                        HStack(spacing: 12) {
+                            Circle().fill(Color(.systemGray5)).frame(width: 29, height: 29)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Placeholder name")
+                                Text("Version 1.0 · slot 0").font(.footnote)
+                            }
+                        }
+                        .redacted(reason: .placeholder)
+                    }
+                }
+            } else if showAll {
+                Section { ForEach(apps) { row($0) } } footer: {
+                    Text(watch.listedLoader == nil ? "Apps in the FMC store. Connect on the Watch tab to install them." : "Apps in the FMC store.")
+                }
             } else {
                 installed(apps)
             }
         }
         .overlay {
-            if apps.isEmpty {
+            if apps.isEmpty, !loading {
                 if showAll {
                     ContentUnavailableView("No apps", systemImage: "square.grid.2x2",
                                            description: Text("Couldn't load the FMC store."))
@@ -298,9 +364,9 @@ struct AppsView: View {
             Section {
                 ForEach(off) { row($0) }
             } header: {
-                Text(watch.loader == nil ? "Asked for permissions" : "Not on the watch")
+                Text(watch.listedLoader == nil ? "Asked for permissions" : "Not on the watch")
             } footer: {
-                if watch.loader == nil { Text("Connect on the Watch tab to see every app on the watch.") }
+                if watch.listedLoader == nil { Text("Connect on the Watch tab to see every app on the watch.") }
             }
         }
     }
@@ -315,7 +381,11 @@ struct AppsView: View {
                 }
                 Spacer()
                 CountBadge(count: perms.pendingCount(app.name))
-                if app.slot != nil, app.update != nil { UpdateButton(name: app.name).buttonStyle(.borderless) }
+                if app.update != nil || (app.slot == nil && StoreApps.shared.listing(app.name)?.package != nil) {
+                    GetButton(app: app)
+                } else if showAll, app.slot != nil {
+                    Text("Installed").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -327,30 +397,85 @@ struct AppView: View {
     private var perms = Permissions.shared
     private let services = PhoneServices.shared
     @State private var resetting = false
+    @State private var deleting = false
 
     init(name: String) { self.name = name }
 
     var body: some View {
-        let app = WatchApp.all(watch.loader, perms).first { $0.name == name } ?? WatchApp(name: name, header: nil, slot: nil)
+        let app = WatchApp.all(watch.listedLoader, perms).first { $0.name == name } ?? WatchApp(name: name, header: nil, slot: nil)
         let caps = perms.caps(name)
+        let listing = StoreApps.shared.listing(name)
         List {
-            Section {
-                VStack(spacing: 8) {
-                    AppIcon(name: name, side: 60)
-                    Text(app.title).font(.title3.weight(.semibold))
-                    Text(app.detail).font(.subheadline).foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .listRowBackground(Color.clear)
-            }
-            if let new = app.update, let listing = StoreApps.shared.listing(name) {
-                Section {
-                    HStack {
-                        Text("Version \(versionText(new.version)) is out").fontWeight(.semibold)
-                        Spacer()
-                        UpdateButton(name: name)
+            // the App Store's header: icon, name, summary, the button, the facts. A section header, not a row: rows
+            // clip to the section's rounded corners, a header spans the screen
+            Section {} header: {
+                VStack(spacing: 14) {
+                HStack(alignment: .top, spacing: 16) {
+                    AppIcon(name: name, side: 108)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(app.title).font(.title2.weight(.bold)).lineLimit(2)
+                        if let listing, !listing.summary.isEmpty {
+                            Text(listing.summary).font(.subheadline).foregroundStyle(.secondary).lineLimit(3)
+                        }
+                        Spacer(minLength: 8)
+                        if listing != nil || app.slot != nil { GetButton(app: app, large: true) }
                     }
-                    Link("Open on fmc.tools", destination: listing.page)
+                    .frame(maxWidth: .infinity, minHeight: 108, alignment: .leading)
+                }
+                if listing?.package != nil, watch.listedLoader == nil {
+                    Text("Connect on the Watch tab to install.").font(.footnote).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let listing { InfoStrip(app: app, listing: listing).padding(.horizontal, -20) }
+                }
+                .textCase(nil)
+                .foregroundStyle(.primary)
+                .padding(.top, 8)
+            }
+            if let listing {
+                if !listing.screenshots.isEmpty {
+                    Section {} header: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Preview").font(.title3.weight(.bold)).foregroundStyle(.primary)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 12) {
+                                    ForEach(listing.screenshots, id: \.self) { url in
+                                        AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Color(.systemGray5) }
+                                            .frame(width: 180, height: 180).clipShape(.circle)
+                                    }
+                                }
+                                .padding(.horizontal, 20)
+                            }
+                            .padding(.horizontal, -20)
+                        }
+                        .textCase(nil)
+                    }
+                }
+                if !listing.description.isEmpty {
+                    Section("Description") {
+                        Markdown(listing.description).textSelection(.enabled).padding(.vertical, 4)
+                    }
+                }
+                Section("Information") {
+                    if !listing.author.isEmpty { LabeledContent("Developer", value: listing.author) }
+                    if !listing.version.isEmpty { LabeledContent("Version", value: listing.version) }
+                    if let h = app.header, let slot = app.slot {
+                        LabeledContent("On the watch", value: "\(versionText(h.version)) · slot \(slot)")
+                    }
+                    if !listing.abi.isEmpty { LabeledContent("Loader ABI", value: listing.abi) }
+                    if let url = URL(string: listing.source), !listing.source.isEmpty {
+                        Link(destination: url) { LabeledContent("Source code") { Image(systemName: "arrow.up.right.square") } }
+                    }
+                }
+            } else {
+                Section { LabeledContent("On the watch", value: app.detail) }
+            }
+            if app.slot != nil {
+                Section {
+                    Button("Delete from the Watch", role: .destructive) { deleting = true }
+                        .disabled(AppUpdates.shared.progress[name] != nil)
+                } footer: {
+                    Text("Removes \(app.title) and its data from the watch.")
                 }
             }
             if caps.isEmpty {
@@ -399,10 +524,22 @@ struct AppView: View {
         }
         .navigationTitle(app.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let listing {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Link(destination: listing.page) { Image(systemName: "safari") }.accessibilityLabel("Open on fmc.tools")
+                }
+            }
+        }
         .task { await StoreApps.shared.load() }
         .confirmationDialog("Reset permissions for \(name)?", isPresented: $resetting, titleVisibility: .visible) {
             Button("Reset", role: .destructive) { perms.reset(name) }
         }
+        .confirmationDialog("Delete \(app.title) from the watch?", isPresented: $deleting, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                if let slot = app.slot { Task { await AppUpdates.shared.remove(name, slot: slot, watch) } }
+            }
+        } message: { Text("Its data on the watch goes too.") }
     }
 
     private func note(_ cap: String) -> String? {
@@ -439,5 +576,49 @@ struct AppView: View {
         case "weather": .cyan
         default: .gray
         }
+    }
+}
+
+/// The App Store's row of facts under the header.
+private struct InfoStrip: View {
+    let app: WatchApp
+    let listing: StoreApps.Listing
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 0) {
+                cell("DOWNLOADS", listing.downloads.formatted(.number.notation(.compactName)), "arrow.down.circle")
+                if !listing.version.isEmpty { cell("VERSION", listing.version, nil) }
+                if !listing.author.isEmpty { cell("DEVELOPER", nil, "person.crop.square", caption: listing.author) }
+                if let slot = app.slot { cell("SLOT", "\(slot)", nil, caption: "on the watch") }
+                if let date = updated { cell("UPDATED", nil, "calendar", caption: date.formatted(.relative(presentation: .named))) }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+        }
+        .overlay(alignment: .top) { Divider().padding(.horizontal, 20) }
+        .overlay(alignment: .bottom) { Divider().padding(.horizontal, 20) }
+    }
+
+    private var updated: Date? {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS'Z'"
+        return f.date(from: listing.updated)
+    }
+
+    private func cell(_ title: LocalizedStringKey, _ value: String?, _ symbol: String?, caption: String? = nil) -> some View {
+        VStack(spacing: 4) {
+            Text(title).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+            Group {
+                if let value { Text(value).font(.title3.weight(.bold)).lineLimit(1).minimumScaleFactor(0.6) }
+                else if let symbol { Image(systemName: symbol).font(.title3) }
+            }
+            .foregroundStyle(.secondary).frame(height: 26)
+            if let caption { Text(caption).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+        }
+        .frame(width: 104, alignment: .top)
+        .overlay(alignment: .trailing) { Divider().frame(height: 36).frame(maxHeight: .infinity) }
     }
 }

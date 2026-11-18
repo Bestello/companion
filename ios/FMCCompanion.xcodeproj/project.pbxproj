@@ -23,6 +23,7 @@
 		6D7388A2D57938D53D35A746 /* FaceLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E717189BB9272DA6A41F8F /* FaceLinkTests.swift */; };
 		84A9930F50E50DA86B3CBEFD /* Account.swift in Sources */ = {isa = PBXBuildFile; fileRef = 661DDBFDDEE1A3553A8E5010 /* Account.swift */; };
 		876ED2DDDC5F80ABC8F6DD5D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DBEA972FC799568E96B70EE6 /* Assets.xcassets */; };
+		A5F75E2D6DB5DC0CB27D038D /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 1649FF7BFD931ABDEE3ECD6D /* MarkdownUI */; };
 		CEE94ED61DE7141BB77FC827 /* Apps.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71CB9B7025162812B720746B /* Apps.swift */; };
 		D6D3564BAC7E915C04695771 /* stock-dials.json in Resources */ = {isa = PBXBuildFile; fileRef = 49774F9C3C84BAA91D96604A /* stock-dials.json */; };
 		EED6A58529E6B025F772E522 /* WakeProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 835AD9304F35D07A99527346 /* WakeProbe.swift */; };
@@ -72,6 +73,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1076436FDFC947C41B97C816 /* WireKit in Frameworks */,
+				A5F75E2D6DB5DC0CB27D038D /* MarkdownUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -176,6 +178,7 @@
 			name = FMCCompanion;
 			packageProductDependencies = (
 				DCBA60A6C6635A5AAC71E3C7 /* WireKit */,
+				1649FF7BFD931ABDEE3ECD6D /* MarkdownUI */,
 			);
 			productName = FMCCompanion;
 			productReference = DE16AEA354DD402560E64E35 /* FMCCompanion.app */;
@@ -202,6 +205,7 @@
 			mainGroup = DE1EC7400D7080ADD768DBAB;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				A1B6AD9529B97C2D47C0AFC3 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 				48E14FD956F4ACEF522AB5CD /* XCLocalSwiftPackageReference "WireKit" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -508,7 +512,23 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		A1B6AD9529B97C2D47C0AFC3 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui";
+			requirement = {
+				kind = exactVersion;
+				version = 2.4.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
+		1649FF7BFD931ABDEE3ECD6D /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B6AD9529B97C2D47C0AFC3 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
+			productName = MarkdownUI;
+		};
 		DCBA60A6C6635A5AAC71E3C7 /* WireKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = WireKit;
