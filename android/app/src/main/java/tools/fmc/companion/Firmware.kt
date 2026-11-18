@@ -103,29 +103,22 @@ object FirmwareModel {
         val pkg = check?.loaderPackage ?: return
         progress = 0.0
         // the services' listener holds the watch's K channel: off while installing
-        val services = model.services
-        if (services) RpcService.stop(context)
-        val link = BleLink(context)
         try {
-            withTimeout(120_000) {
-                link.connect()
-                // ponytail: K read fresh each time (a few seconds) rather than trying the cached one first
-                val (session, secret) = KSession.open(link, register = false)
-                model.store["k-${link.watchId}"] = secret
-                install(session, pkg) { p -> progress = p }
-            }
+            kInstall(context, model, pkg) { p -> progress = p }
             DevLog.log(context, "App Loader installed (crc %08x)".format(check?.loaderHeader?.crc ?: 0))
             error = null
         } catch (e: CancellationException) {
             throw e
         } catch (_: InstallError.Busy) {
-            error = "Close the Apps menu and any running app on the watch, then try again."
+            // stub 6 takes the install behind a page and reloads it there (cmf-watch-sdk docs/abi-1.4.md): busy is
+            // then only what is on screen
+            error = if ((model.loader?.stub?.version ?: 0) >= 6)
+                "An app or the Apps menu is open on the watch. Go back to the watch face, then try again."
+            else "The App Loader is running on the watch. Close the Apps menu and any running app, and remove the watch app pages and widgets you added, then try again. Patched firmware with stub 6 or later doesn't need this."
         } catch (e: Exception) {
             error = "Couldn't update the App Loader: ${e.message}"
         } finally {
-            link.disconnect()
             progress = null
-            if (services) RpcService.start(context)
         }
         if (error == null) model.check()
     }
@@ -201,5 +194,24 @@ fun FirmwareScreen(model: AppModel, back: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+/** One package over K (the loader or an app, into its own slot); the services' listener holds K, so it is off meanwhile. */
+suspend fun kInstall(context: Context, model: AppModel, pkg: ByteArray, progress: (Double) -> Unit) {
+    val services = model.services
+    if (services) RpcService.stop(context)
+    val link = BleLink(context)
+    try {
+        withTimeout(120_000) {
+            link.connect()
+            // ponytail: K read fresh each time (a few seconds) rather than trying the cached one first
+            val (session, secret) = KSession.open(link, register = false)
+            model.store["k-${link.watchId}"] = secret
+            install(session, pkg, progress)
+        }
+    } finally {
+        link.disconnect()
+        if (services) RpcService.start(context)
     }
 }

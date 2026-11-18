@@ -71,9 +71,12 @@ struct ContentView: View {
             List {
                 Section {
                     WatchStatus()
+                        // the watch is usually there: read it on opening, as the Apps tab does
+                        .task { if watch.phase == .idle { await watch.check() } }
                 } footer: {
                     Text("Keep the watch connected in Nothing X. The app only reads from it.")
                 }
+                FacesOnWatchSection()
                 Section {
                     NavigationLink(value: Route.firmware) {
                         HStack(spacing: 12) {
@@ -83,9 +86,6 @@ struct ContentView: View {
                             CountBadge(count: FirmwareModel.shared.updates(watch.loader))
                         }
                     }
-                }
-                FacesOnWatchSection()
-                Section {
                     NavigationLink(value: Route.developer) {
                         HStack(spacing: 12) {
                             SettingsIcon(symbol: "hammer.fill", color: .gray)
@@ -96,7 +96,12 @@ struct ContentView: View {
                 Section("FMC account") {
                     if let user = account.user {
                         HStack(spacing: 14) {
-                            Badge { Image(systemName: "person.fill").font(.title3) }
+                            AsyncImage(url: user.avatarURL) { $0.resizable().scaledToFill() } placeholder: {
+                                Image(systemName: "person.fill").font(.title3).foregroundStyle(Color.fmcOnAccent)
+                            }
+                            .frame(width: 44, height: 44)
+                            .background(Color.fmcAccent)
+                            .clipShape(.circle)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(user.name.isEmpty ? "Signed in" : user.name).font(.body.weight(.semibold))
                                 Text(user.email).font(.subheadline).foregroundStyle(.secondary)
@@ -140,17 +145,30 @@ struct ContentView: View {
 /// The watch tile from workout-companion's WatchView, with Zeron's capsule button under it.
 struct WatchStatus: View {
     @Environment(WatchModel.self) private var watch
+    /// changes with every read of the faces: the active one is redrawn
+    @AppStorage("faces-on-watch-header") private var header = ""
+
+    /// The face on screen as last read.
+    private var active: DialSlot? {
+        _ = header
+        guard let id = FaceInstall.activeDial else { return nil }
+        let ids = UserDefaults.standard.array(forKey: "faces-on-watch") as? [UInt32] ?? []
+        return DialSlot(id: id, index: ids.firstIndex(of: id) ?? 0)
+    }
 
     var body: some View {
-        VStack(spacing: 16) {
+        // the bezel is the layout: the same gap above it and to the button; case and strap get cut by both
+        VStack(spacing: 12) {
             HStack(spacing: 16) {
-                Badge(side: 64, filled: connected) {
-                    Image(systemName: "applewatch").font(.system(size: 30, weight: .medium))
-                        .symbolEffect(.pulse, isActive: watch.phase == .checking)
+                WatchFrame(side: 76) {
+                    if let active { DialPicture(slot: active) } else { Color.black }
                 }
+                // the bezel lines up with the button's left edge; the case hangs out past it
+                .padding(.trailing, 16)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.title3.bold())
-                    Text(detail).font(.subheadline).foregroundStyle(detailColor)
+                    // one line each: a taller row would move the watch
+                    Text(title).font(.title3.bold()).lineLimit(1).minimumScaleFactor(0.8)
+                    Text(detail).font(.subheadline).foregroundStyle(detailColor).lineLimit(1).minimumScaleFactor(0.8)
                 }
                 Spacer(minLength: 0)
             }
@@ -162,8 +180,10 @@ struct WatchStatus: View {
             }
             .buttonStyle(.primary)
             .disabled(watch.phase == .checking)
+            // opaque while disabled: the strap runs under it
+            .background(Color(.secondarySystemGroupedBackground), in: .capsule)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 2)
     }
 
     private var connected: Bool { if case .checked = watch.phase { true } else { false } }
@@ -171,7 +191,7 @@ struct WatchStatus: View {
     private var title: LocalizedStringKey {
         switch watch.phase {
         case .idle: "Not connected"
-        case .checking: "Reading the watch…"
+        case .checking: "Connecting…"
         case .checked: "Connected"
         case .failed: "Couldn't connect"
         }
@@ -206,69 +226,102 @@ struct FacesOnWatchSection: View {
     @State private var header = ""
     @State private var reading = false
     @State private var error: String?
+    /// No usable stock key: reading the list needs a bind, which only the user starts.
+    @State private var busy = false
+    @State private var deleting: DialSlot?
 
     var body: some View {
         Section {
             if !faces.isEmpty {
                 // as Nothing X and fmc.tools show them: the round previews in the watch's own order
-                ScrollView(.horizontal, showsIndicators: false) {
+                ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: 12) {
                         ForEach(faces) { slot in
-                            let face = slot.face(in: catalog)
-                            VStack(spacing: 6) {
-                                if let url = face?.previewURL ?? slot.savedPreview {
-                                    FacePreview(url: url)
-                                } else {
-                                    // no picture anywhere for stock and Nothing X faces: the watch's place for it
-                                    Circle().fill(.black).aspectRatio(1, contentMode: .fit).overlay {
-                                        Text("\(slot.index + 1)").font(.system(.title, design: .rounded, weight: .bold))
-                                            .foregroundStyle(Color.fmcAccent)
-                                    }
+                            // a Menu, not .contextMenu: in a List row that one lifts the whole row, not this face
+                            Menu {
+                                Button("Show on the watch", systemImage: "applewatch") {
+                                    Task { await change { try await FaceInstall.activate(slot.id) } }
                                 }
-                                Text(face?.name ?? slot.label).font(.caption.weight(.semibold)).lineLimit(1)
+                                // the menu's .primary tint reaches the icon too: red for this one
+                                Button("Delete", systemImage: "trash", role: .destructive) { deleting = slot }
+                                    .tint(.red)
+                            } label: {
+                                DialTile(slot: slot, active: slot.id == active)
+                            } primaryAction: {
+                                Task { await change { try await FaceInstall.activate(slot.id) } }
                             }
-                            .frame(width: 84)
+                            // the app's yellow tint would color the menu: system colors there, red for Delete
+                            .tint(.primary)
+                            .buttonStyle(.plain)
+                            .disabled(busy)
+                            .opacity(busy ? 0.4 : 1)
                         }
                     }
                 }
+                .scrollIndicators(.visible)
+                // edge to edge in the row, the first face still lined up with the text
+                .contentMargins(.horizontal, 20, for: .scrollContent)
+                .contentMargins(.bottom, 10, for: .scrollContent)
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                 .padding(.vertical, 6)
             }
             if reading {
                 HStack { Text("Reading the watch…").foregroundStyle(.secondary); Spacer(); ProgressView() }
             } else if faces.isEmpty {
-                Text("Install a face from the app once: after that the list is read on every connect.")
-                    .foregroundStyle(.secondary)
+                Text("Connect to see the faces on the watch.").foregroundStyle(.secondary)
             }
             if let error { Text(error).font(.footnote).foregroundStyle(.red) }
         } header: {
             if let count, count.count == 2 { Text("Watch faces · \(count[0]) of \(count[1])") } else { Text("Watch faces") }
-        } footer: {
-            if let date {
-                Text("Read \(date.formatted(.relative(presentation: .named))). Numbered in the order the watch shows them.")
-                + Text(header.isEmpty ? "" : "\nWatch header: \(header)").monospaced()
-            }
         }
         // the catalog loads with the Watch faces tab; this one can come first
         .task { if catalog.all.isEmpty { await catalog.load() } }
         .onAppear(perform: load)
-        // right after each connect
-        .task(id: watch.phase) { if case .checked = watch.phase { await read() } }
+        // right after each connect, with the saved key only: a bind takes the watch from Nothing X
+        .task(id: watch.phase) { if case .checked = watch.phase { await read(bind: false) } }
+        .alert("Delete \(deleting?.label ?? "")?", isPresented: Binding { deleting != nil } set: { if !$0 { deleting = nil } }) {
+            Button("Delete", role: .destructive) {
+                if let id = deleting?.id { Task { await change { try await FaceInstall.delete(id) } } }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("It goes from the watch. To get it back, install it again.")
+        }
     }
 
-    private func read() async {
+    private func read(bind: Bool, retry: Bool = true) async {
         reading = true
         defer { reading = false }
         do {
-            try await FaceInstall.read()
+            try await FaceInstall.read(bind: bind)
             error = nil
             load()
             DevLog.shared.log("faces: \(faces.count) read, header \(header.isEmpty ? "none" : header)")
-        } catch UploadError.authFailed {
-            // no saved key: the first install from the app binds, the list comes after that
-            DevLog.shared.log("faces: no saved stock key (install a face from the app once)")
+        } catch WireError.timeout where !bind && retry {
+            // right after a connect or Bluetooth coming back the watch can be slow to answer: once more
+            DevLog.shared.log("faces: no answer, again")
+            await read(bind: false, retry: false)
+        } catch UploadError.authFailed where !bind, WireError.timeout where !bind {
+            DevLog.shared.log("faces: \(error is UploadError ? "the saved stock key was refused" : "no answer"), the list stays as last read")
         } catch {
             DevLog.shared.log("faces: \(error.localizedDescription)")
             self.error = String(localized: "Couldn't read the faces on the watch: \(error.localizedDescription)")
+        }
+    }
+
+    /// The face on screen: a055 byte 1 (cmf-watch-sdk docs/recon.md, "Stock watch faces"), as of the last read.
+    private var active: UInt32? { _ = header; return FaceInstall.activeDial }
+
+    /// A change to the list on the watch, then the list again.
+    private func change(_ op: () async throws -> Void) async {
+        busy = true
+        defer { busy = false }
+        do {
+            try await op()
+            error = nil
+            load()
+        } catch {
+            self.error = String(localized: "Couldn't change the faces on the watch: \(error.localizedDescription)")
         }
     }
 
@@ -283,6 +336,65 @@ struct FacesOnWatchSection: View {
 
 /// Zeron's welcome page (mark, title, tagline, capsule buttons) around a grouped section for the fields.
 /// A List, not a ScrollView: a TextField in a ScrollView loops layout on iOS 27.
+/// A face on the watch as Nothing X and fmc.tools show it: its round preview and name; the active one ringed yellow.
+struct DialTile: View {
+    @Environment(Catalog.self) private var catalog
+    let slot: DialSlot
+    var active = false
+
+    var body: some View {
+        let face = slot.face(in: catalog)
+        VStack(spacing: 6) {
+            DialPicture(slot: slot)
+            .padding(3)
+            .overlay { if active { Circle().strokeBorder(Color.fmcAccent, lineWidth: 2.5) } }
+            Text(face?.name ?? slot.label).font(.caption.weight(.semibold)).lineLimit(1)
+        }
+        .frame(width: 84)
+    }
+}
+
+/// A face's round picture: its preview, else the black panel with its number.
+struct DialPicture: View {
+    @Environment(Catalog.self) private var catalog
+    let slot: DialSlot
+
+    var body: some View {
+        if let url = slot.face(in: catalog)?.previewURL ?? slot.savedPreview {
+            FacePreview(url: url)
+        } else {
+            // no picture anywhere for stock and Nothing X faces: the watch's place for it
+            Circle().fill(.black).aspectRatio(1, contentMode: .fit).overlay {
+                Text("\(slot.index + 1)").font(.system(.title, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.fmcAccent)
+            }
+        }
+    }
+}
+
+/// The CMF Watch Pro 2 render fmc.tools frames dials with (fmc_frontend watch-case.svelte), `content` on its glass.
+/// Laid out as the bezel alone (`side` across): the case and strap hang outside it and take no space. The render is
+/// square, the bezel 51.75% of it, centred a hair under the middle; the panel 94% of the bezel.
+struct WatchFrame<Content: View>: View {
+    var side: CGFloat
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        let render = side / 0.5175
+        content
+            .frame(width: side * 0.94, height: side * 0.94)
+            .clipShape(.circle)
+            .frame(width: side, height: side)
+            .background(Circle().fill(.black))
+            .background {
+                Image("WatchFrame").resizable().frame(width: render, height: render)
+                    .offset(y: -render * 0.00175)
+                    .allowsHitTesting(false)
+            }
+            .accessibilityHidden(true)
+    }
+}
+
 struct SignInView: View {
     @Environment(Account.self) private var account
     @Environment(\.dismiss) private var dismiss

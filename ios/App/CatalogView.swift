@@ -126,6 +126,8 @@ struct FaceDetail: View {
     /// The watch is full: the install waits here for the dial to replace.
     @State private var slots: [DialSlot] = []
     @State private var picking: CheckedContinuation<UInt32?, Never>?
+    /// Picked on the Install tap, before connecting.
+    @State private var preset: UInt32?
 
     var body: some View {
         List {
@@ -176,14 +178,31 @@ struct FaceDetail: View {
                 Text("This face has a \(big.w)×\(big.h) px image, larger than factory faces use. Large images can make the watch restart in a loop.")
             }
         }
-        .confirmationDialog("The watch is full", isPresented: Binding { picking != nil } set: {
-            // after a button's own answer, so a tap outside is the only thing that lands here
-            if !$0 { DispatchQueue.main.async { answer(nil) } }
-        }, titleVisibility: .visible) {
-            ForEach(slots) { s in Button("Replace \(s.label)", role: .destructive) { answer(s.id) } }
-            Button("Cancel", role: .cancel) { answer(nil) }
-        } message: {
-            Text("Pick the face to replace. Faces are numbered in the order the watch shows them.")
+        // the faces as on the Watch tab: tap the one to replace. A swipe down cancels.
+        .sheet(isPresented: Binding { picking != nil } set: { if !$0 { answer(nil) } }) {
+            NavigationStack {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Pick the face to replace. Faces are in the order the watch shows them.")
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 20)
+                    ScrollView(.horizontal) {
+                        LazyHStack(alignment: .top, spacing: 12) {
+                            ForEach(slots) { s in
+                                Button { answer(s.id) } label: { DialTile(slot: s) }.buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .scrollIndicators(.visible)
+                    .contentMargins(.horizontal, 20, for: .scrollContent)
+                    .contentMargins(.bottom, 10, for: .scrollContent)
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, 8)
+                .navigationTitle("The watch is full")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { answer(nil) } } }
+            }
+            .presentationDetents([.height(280)])
         }
         .alert("Couldn't install", isPresented: Binding { failure != nil } set: { if !$0 { failure = nil } }) {
             Button("OK") {}
@@ -201,7 +220,7 @@ struct FaceDetail: View {
                 .padding(.horizontal, 20)
         } else {
             Button {
-                closeNothingX = true
+                Task { await start(face) }
             } label: {
                 Label(installed ? "Installed" : "Install",
                       systemImage: installed ? "checkmark" : "arrow.down.circle")
@@ -213,6 +232,23 @@ struct FaceDetail: View {
 
     private var footer: LocalizedStringKey {
         "Close Nothing X before installing: the watch talks to one app at a time."
+    }
+
+    /// Full when last read: the dial to replace first, then the Nothing X warning.
+    private func start(_ face: Watchface) async {
+        preset = nil
+        if let known = FaceInstall.knownFull(seed: face.id) {
+            guard let picked = await pick(known) else { return }
+            preset = picked
+        }
+        closeNothingX = true
+    }
+
+    private func pick(_ slots: [DialSlot]) async -> UInt32? {
+        await withCheckedContinuation { c in
+            self.slots = slots
+            picking = c
+        }
     }
 
     private func fetchAndInstall() async {
@@ -237,12 +273,7 @@ struct FaceDetail: View {
         progress = 0
         defer { progress = nil }
         do {
-            try await FaceInstall.install(bin, seed: face.id, name: face.name, pick: { slots in
-                await withCheckedContinuation { c in
-                    self.slots = slots
-                    picking = c
-                }
-            }) { p in
+            try await FaceInstall.install(bin, seed: face.id, name: face.name, slot: preset, pick: { await pick($0) }) { p in
                 Task { @MainActor in progress = Double(p) / 100 }
             }
             UserDefaults.standard.set(face.previewURL, forKey: "dial-preview-\(dialId(face.id))")

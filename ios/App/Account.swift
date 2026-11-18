@@ -12,6 +12,11 @@ struct User: Decodable, Equatable {
     var id: String
     var email: String
     var name: String
+    var avatar: String?
+
+    var avatarURL: URL? {
+        avatar.flatMap { $0.isEmpty ? nil : URL(string: "https://fmc.tools/api/files/users/\(id)/\($0)?thumb=100x100") }
+    }
 }
 
 struct OAuthProvider: Decodable, Identifiable {

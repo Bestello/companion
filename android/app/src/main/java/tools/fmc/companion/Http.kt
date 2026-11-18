@@ -36,9 +36,11 @@ suspend fun http(method: String, url: String, json: JSONObject? = null, token: S
         }
     }
 
-suspend fun download(url: String): ByteArray = withContext(Dispatchers.IO) {
+/** `first`: only that many bytes from the start (a Range request; a server that ignores it sends the whole file). */
+suspend fun download(url: String, first: Int? = null): ByteArray = withContext(Dispatchers.IO) {
     val c = URL(url).openConnection() as HttpURLConnection
     try {
+        first?.let { c.setRequestProperty("Range", "bytes=0-${it - 1}") }
         if (c.responseCode !in 200..299) throw ServerError(c.responseCode, "Download failed (${c.responseCode})")
         c.inputStream.use { it.readBytes() }
     } finally {

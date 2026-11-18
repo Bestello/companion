@@ -77,29 +77,36 @@ import WireKit
         }
     }
 
+    /// One package over K (the loader or an app, into its own slot), with the RPC listener off meanwhile.
+    static func install(_ pkg: Data, progress: @escaping @Sendable (Double) -> Void) async throws {
+        RPCListener.shared.stop()
+        defer { RPCListener.shared.start() }
+        let link = BLELink()
+        defer { link.disconnect() }
+        try await link.connect()
+        try await KLock.shared.run {
+            let (session, _) = try await WatchModel.open(link)
+            _ = try await WireKit.install(session, package: pkg, progress: progress)
+        }
+    }
+
     /// Installs the store's App Loader over K, then reads the watch again.
     func updateLoader(_ watch: WatchModel) async {
         guard let pkg = check?.loaderPackage else { return }
         progress = 0
         defer { progress = nil }
-        RPCListener.shared.stop()
-        defer { RPCListener.shared.start() }
-        let link = BLELink()
         do {
-            try await link.connect()
-            try await KLock.shared.run {
-                let (session, _) = try await WatchModel.open(link)
-                _ = try await WireKit.install(session, package: pkg) { p in Task { @MainActor in self.progress = p } }
-            }
-            link.disconnect()
+            try await Self.install(pkg) { p in Task { @MainActor in self.progress = p } }
             DevLog.shared.log("App Loader installed (crc \(String(format: "%08x", check?.loaderHeader?.crc ?? 0)))")
             error = nil
             await watch.check()
         } catch InstallError.busy {
-            link.disconnect()
-            error = String(localized: "Close the Apps menu and any running app on the watch, then try again.")
+            // stub 6 takes the install behind a page and reloads it there (cmf-watch-sdk docs/abi-1.4.md): busy is
+            // then only what is on screen
+            error = (watch.loader?.stub.version ?? 0) >= 6
+                ? String(localized: "An app or the Apps menu is open on the watch. Go back to the watch face, then try again.")
+                : String(localized: "The App Loader is running on the watch. Close the Apps menu and any running app, and remove the watch app pages and widgets you added, then try again. Patched firmware with stub 6 or later doesn't need this.")
         } catch {
-            link.disconnect()
             self.error = String(localized: "Couldn't update the App Loader: \(error.localizedDescription)")
         }
     }

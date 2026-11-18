@@ -17,6 +17,10 @@ public enum StockCmd {
     public static let wfInit1Req = k(0x8052), wfInit1Rep = k(0x0052), wfInit2Req = k(0x9075), wfInit2Rep = k(0xA075)
     public static let wfChunkReq = k(0xA064), wfChunkWrite = k(0x9064), wfFinishAck1 = k(0xA065)
     public static let wfFinishAck2 = k(0x9065), wfInstalled = k(0xA055)
+    /// get (`00`) or set (`01 ‖ active ‖ count ‖ 00 ‖ ids`) the dial list (cmf-watch-sdk docs/recon.md, "Stock watch faces")
+    public static let wfList = k(0x9055)
+    /// ble-protocol.ts `time`, `fwGet`
+    public static let time = k(0x8004), fwGet = k(0x8006)
     /// Sent and read in the clear (body ‖ crc32le); `authFailed` because the watch could not decrypt.
     static let plain: Set<UInt32> = [authPairReq, authPairRep, wfChunkWrite, authFailed]
     /// What goes over the data pair (ffe1); everything else goes over fff2.
@@ -157,6 +161,8 @@ public actor StockSession {
     private let inbox = Inbox<(UInt32, Data)>()
     /// Latest `a055`: the dials the watch reported (side-loaded ones are missing from it).
     public private(set) var reported: [UInt32]?
+    /// Every entry of the latest `a055`, the photo face (FFFFFFFF) included: what a set sends back.
+    public private(set) var listed: [UInt32]?
     /// Latest `a055` header: how many dials, side-loaded included, and how many fit (`parseDialCount`).
     public private(set) var dialCount: (count: Int, capacity: Int)?
     /// Latest `a055` header, raw, for field reports.
@@ -185,7 +191,9 @@ public actor StockSession {
             return
         } catch { return }
         guard let (cmd, p) = got else { return }
-        if cmd == StockCmd.wfInstalled {
+        // a set's ack is a055 with the single byte 00
+        if cmd == StockCmd.wfInstalled, p.count >= 4 {
+            listed = stride(from: 4, to: p.count - 3, by: 4).map { p.le(UInt32.self, at: $0) }
             reported = parseInstalledDials(p)
             dialHeader = Data(p.prefix(4))
             dialCount = parseDialCount(p)
@@ -257,6 +265,33 @@ public actor StockSession {
         await inbox.drain()
         try await name(timeout: .seconds(8))
         try await openSession(k1: k1)
+    }
+
+    /// The dials on the watch. a055 comes with the housekeeping after the time and fwGet the site sends right after
+    /// auth (ble.ts fetchInfo), not on auth alone; waits up to `timeout` for it.
+    public func installedDials(timeout: Duration = .seconds(4)) async -> [UInt32]? {
+        if reported == nil {
+            let now = UInt32(Date().timeIntervalSince1970)
+            let tz = UInt32(bitPattern: Int32(TimeZone.current.secondsFromGMT() * 1000))
+            var t = Data()
+            for v in [now, tz] { withUnsafeBytes(of: v.bigEndian) { t.append(contentsOf: $0) } }
+            try? await send(StockCmd.time, t)
+            try? await send(StockCmd.fwGet, Data())
+            _ = try? await next([StockCmd.wfInstalled], timeout: timeout)
+        }
+        return reported
+    }
+
+    /// Sets the dial list: the watch keeps the given ids it has, in this order, drops the rest, and shows
+    /// `ids[active]`. It can't add a face. Reads the list again (the ack says nothing about what matched).
+    public func setDials(_ ids: [UInt32], active: Int) async throws {
+        var p = Data([1, UInt8(active), UInt8(ids.count), 0])
+        for id in ids { p.le(id) }
+        try await send(StockCmd.wfList, p)
+        _ = try await next([StockCmd.wfInstalled], timeout: .seconds(4))
+        reported = nil
+        try await send(StockCmd.wfList, Data([0]))
+        _ = try await next([StockCmd.wfInstalled], timeout: .seconds(4))
     }
 
     private func openSession(k1: Data) async throws {

@@ -7,7 +7,7 @@ DEVICE ?= iPhone
 APP_ID  = tools.fmc.companion
 XCB     = xcodebuild -project ios/FMCCompanion.xcodeproj -scheme FMCCompanion -configuration Debug -quiet
 
-.PHONY: ios-sim ios-device android test
+.PHONY: ios-sim ios-device android android-release test
 
 ios-sim:
 	$(XCB) -destination 'platform=iOS Simulator,name=$(SIM)' -derivedDataPath build/ios-sim build
@@ -27,6 +27,15 @@ ios-device:
 android:
 	cd android && ./gradlew installDebug
 	adb shell am start -n $(APP_ID)/.MainActivity
+
+# signed with android/keystore.properties; bump versionCode in android/app/build.gradle.kts first
+CODE = $$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' android/app/build.gradle.kts)
+NAME = $$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' android/app/build.gradle.kts)
+android-release:
+	@test -f android/keystore.properties || { echo "android/keystore.properties is missing (see build.gradle.kts)"; exit 1; }
+	cd android && ./gradlew assembleRelease
+	mkdir -p build && cp android/app/build/outputs/apk/release/app-release.apk build/fmc-companion-$(CODE).apk
+	gh release create android-$(NAME) build/fmc-companion-$(CODE).apk --title "Android $(NAME)" --notes ""
 
 test:
 	swift test --package-path ios/WireKit

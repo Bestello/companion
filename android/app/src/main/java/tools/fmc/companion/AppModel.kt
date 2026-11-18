@@ -36,6 +36,8 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         private set
     var phase by mutableStateOf<Phase>(Phase.Idle)
         private set
+    /** Bumped after each read or change of the faces on the watch: what shows them reads them again. */
+    var facesRead by mutableStateOf(0)
 
     var services by mutableStateOf(prefs.getBoolean("services", false))
         private set
@@ -50,6 +52,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     val loader get() = (phase as? Phase.Checked)?.state
 
     init {
+        viewModelScope.launch { AppUpdate.check() }
         viewModelScope.launch {
             account.restore()
             user = account.user

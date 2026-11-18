@@ -51,6 +51,7 @@ struct DialSlot: Identifiable {
 }
 
 /// ble.ts WF_CAPACITY
+// ponytail: the watch takes 6; a055's 4th byte says 7 (a built-in face?), so it is ignored
 let capacity = 6
 
 enum FaceInstall {
@@ -94,8 +95,6 @@ enum FaceInstall {
             let k1 = try await session.pair(secret: Data(hex: secret ?? "") ?? Data())
             Keychain.set("stock-\(watch)", k1.map { String(format: "%02x", $0) }.joined())
         }
-        // a055 comes on its own after auth
-        try await Task.sleep(for: .seconds(1.5))
         return try await body(session, watch)
     }
 
@@ -103,7 +102,7 @@ enum FaceInstall {
     private static func dials(_ session: StockSession, _ watch: String) async
         -> (mine: [UInt32], installed: [UInt32], counted: (count: Int, capacity: Int)?, header: String) {
         let mine = UserDefaults.standard.array(forKey: "dials-\(watch)") as? [UInt32] ?? []
-        let reported = await session.reported ?? []
+        let reported = await session.installedDials() ?? []
         let installed = reported + mine.filter { !reported.contains($0) }
         // the header counts side-loaded dials too; the hardcoded capacity and the id list are the fallback
         let counted = await session.dialCount
@@ -121,23 +120,77 @@ enum FaceInstall {
         UserDefaults.standard.set(header, forKey: "faces-on-watch-header")
     }
 
-    /// Reads the dials off the watch for the Watch tab, with the saved key only: no bind popup on a watch this app
-    /// never installed on. Takes the watch from Nothing X, like an install.
-    @MainActor static func read() async throws {
-        try await session(bind: false) { session, watch in
+    /// Reads the dials off the watch for the Watch tab. `bind`: when the saved key is missing or refused, bind
+    /// (a popup on the watch, and Nothing X loses the watch, like an install); else that throws authFailed.
+    @MainActor static func read(bind: Bool) async throws {
+        try await session(bind: bind) { session, watch in
             let d = await dials(session, watch)
-            remember(d.installed, count: d.counted?.count, capacity: d.counted?.capacity ?? capacity, header: d.header)
+            remember(d.installed, count: d.counted?.count, capacity: capacity, header: d.header)
+            UserDefaults.standard.set(await session.listed, forKey: "faces-on-watch-all")
         }
     }
 
-    /// Uploads `bin`. `pick`: the watch is full, which dial goes; nil cancels the install.
-    @MainActor static func install(_ bin: Data, seed: String, name: String,
+    /// The face on screen, from the last read: a055 byte 1 indexes the full list.
+    static var activeDial: UInt32? {
+        let all = UserDefaults.standard.array(forKey: "faces-on-watch-all") as? [UInt32] ?? []
+        let header = UserDefaults.standard.string(forKey: "faces-on-watch-header") ?? ""
+        guard let i = header.split(separator: " ").dropFirst().first.flatMap({ Int($0, radix: 16) }), all.indices.contains(i)
+        else { return nil }
+        return all[i]
+    }
+
+    /// Shows `id` on the watch.
+    @MainActor static func activate(_ id: UInt32) async throws {
+        try await edit { all, _ in all.firstIndex(of: id).map { (all, $0) } }
+    }
+
+    /// Takes `id` off the watch; the face on screen stays, or the first one if it was that. A downloaded face's
+    /// file goes at the watch's next boot or upload; built-in faces stay on it, unlisted.
+    @MainActor static func delete(_ id: UInt32) async throws {
+        try await edit { all, active in
+            let kept = all.filter { $0 != id }
+            return kept.count == all.count ? nil : (kept, active.flatMap { kept.firstIndex(of: all[$0]) } ?? 0)
+        }
+    }
+
+    /// Reads the full list, sends `change(list, active index)` (nil: nothing to do), saves what the watch reports.
+    @MainActor private static func edit(_ change: ([UInt32], Int?) -> ([UInt32], Int)?) async throws {
+        try await session(bind: false) { session, watch in
+            _ = await session.installedDials()
+            let all = await session.listed ?? []
+            let active = await session.dialHeader.flatMap { $0.count >= 2 ? Int($0[$0.startIndex + 1]) : nil }
+            if let (ids, i) = change(all, active) {
+                try await session.setDials(ids, active: i)
+                // a face taken off is no longer this app's either
+                let listed = await session.listed ?? []
+                let mine = UserDefaults.standard.array(forKey: "dials-\(watch)") as? [UInt32] ?? []
+                UserDefaults.standard.set(mine.filter { listed.contains($0) }, forKey: "dials-\(watch)")
+            }
+            let d = await dials(session, watch)
+            remember(d.installed, count: d.counted?.count, capacity: capacity, header: d.header)
+            UserDefaults.standard.set(await session.listed, forKey: "faces-on-watch-all")
+        }
+    }
+
+    /// The dials to pick from before connecting: the watch was full when last read and this face isn't on it.
+    /// nil: room, or never read; the install finds out on the watch.
+    static func knownFull(seed: String) -> [DialSlot]? {
+        let ids = UserDefaults.standard.array(forKey: "faces-on-watch") as? [UInt32] ?? []
+        let count = UserDefaults.standard.array(forKey: "faces-on-watch-count") as? [Int]
+        let full = (count?.first ?? ids.count) >= capacity
+        guard full, !ids.isEmpty, !ids.contains(dialId(seed)) else { return nil }
+        return ids.enumerated().map { DialSlot(id: $1, index: $0) }
+    }
+
+    /// Uploads `bin`. `slot`: the dial to replace, picked before connecting (`knownFull`); `pick`: the watch is full
+    /// and nothing was picked yet, which dial goes; nil cancels the install.
+    @MainActor static func install(_ bin: Data, seed: String, name: String, slot preset: UInt32? = nil,
                                    pick: @MainActor ([DialSlot]) async -> UInt32?,
                                    progress: @escaping @Sendable (Int) -> Void) async throws {
         try await session { session, watch in
             let (mine, installed, counted, header) = await dials(session, watch)
-            let cap = counted?.capacity ?? capacity
-            let full = counted.map { $0.count >= $0.capacity } ?? (installed.count >= capacity)
+            let cap = capacity
+            let full = (counted?.count ?? installed.count) >= capacity
             // which dial to replace (ble.ts NoFreeSlotError, slot-dialog.svelte)
             func ask() async throws -> UInt32 {
                 guard let picked = await pick(installed.enumerated().map { DialSlot(id: $1, index: $0) })
@@ -145,8 +198,9 @@ enum FaceInstall {
                 return picked
             }
             // full and not a re-install of this face: ask before sending anything
-            var slot: UInt32?
-            if full, !installed.contains(dialId(seed)) { slot = try await ask() }
+            // a pick made from a stale list stands only while that dial is still there
+            var slot = preset.flatMap { installed.contains($0) ? $0 : nil }
+            if slot == nil, full, !installed.contains(dialId(seed)) { slot = try await ask() }
             let id: UInt32
             do {
                 do {

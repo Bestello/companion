@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -17,8 +19,22 @@ android {
         versionName = "0.1.0"
     }
 
+    // The release key, outside the repo: android/keystore.properties (file, storePassword, keyAlias, keyPassword).
+    // Every update must be signed with it; lose it and users reinstall.
+    val keys = rootProject.file("keystore.properties").takeIf { it.exists() }
+        ?.let { f -> Properties().apply { f.inputStream().use { load(it) } } }
+    keys?.let { k ->
+        signingConfigs.create("release") {
+            storeFile = file(k.getProperty("file"))
+            storePassword = k.getProperty("storePassword")
+            keyAlias = k.getProperty("keyAlias")
+            keyPassword = k.getProperty("keyPassword")
+        }
+    }
+
     buildTypes {
         release {
+            keys?.let { signingConfig = signingConfigs.getByName("release") }
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
         }

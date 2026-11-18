@@ -21,6 +21,10 @@ object StockCmd {
     val WF_INIT1_REQ = k(0x8052); val WF_INIT1_REP = k(0x0052); val WF_INIT2_REQ = k(0x9075); val WF_INIT2_REP = k(0xA075)
     val WF_CHUNK_REQ = k(0xA064); val WF_CHUNK_WRITE = k(0x9064); val WF_FINISH_ACK1 = k(0xA065)
     val WF_FINISH_ACK2 = k(0x9065); val WF_INSTALLED = k(0xA055)
+    /** get (`00`) or set (`01 ‖ active ‖ count ‖ 00 ‖ ids`) the dial list (cmf-watch-sdk docs/recon.md, "Stock watch faces") */
+    val WF_LIST = k(0x9055)
+    /** ble-protocol.ts `time`, `fwGet` */
+    val TIME = k(0x8004); val FW_GET = k(0x8006)
 
     /** Sent and read in the clear (body ‖ crc32le); `AUTH_FAILED` because the watch could not decrypt. */
     val PLAIN = setOf(AUTH_PAIR_REQ, AUTH_PAIR_REP, WF_CHUNK_WRITE, AUTH_FAILED)
@@ -162,6 +166,8 @@ class StockSession(private val link: Link, private val mtu: Int = 180) {
 
     /** Latest `a055`: the dials the watch reported (side-loaded ones are missing from it). */
     @Volatile var reported: List<Long>? = null
+    /** Every entry of the latest `a055`, the photo face (FFFFFFFF) included: what a set sends back. */
+    @Volatile var listed: List<Long>? = null
     /** Latest `a055` header: how many dials, side-loaded included, and how many fit ([parseDialCount]). */
     @Volatile var dialCount: DialCount? = null
     /** Latest `a055` header, raw, for field reports. */
@@ -188,7 +194,9 @@ class StockSession(private val link: Link, private val mtu: Int = 180) {
         } catch (_: StockFailure) {
             return
         } ?: return
-        if (got.first == StockCmd.WF_INSTALLED) {
+        // a set's ack is a055 with the single byte 00
+        if (got.first == StockCmd.WF_INSTALLED && got.second.size >= 4) {
+            listed = (4 until got.second.size - 3 step 4).map { got.second.le32(it) }
             reported = parseInstalledDials(got.second)
             dialHeader = got.second.copyOf(minOf(4, got.second.size))
             dialCount = parseDialCount(got.second)
@@ -258,6 +266,33 @@ class StockSession(private val link: Link, private val mtu: Int = 180) {
         inbox.drain()
         name(8000)
         openSession(k1)
+    }
+
+    /**
+     * The dials on the watch. a055 comes with the housekeeping after the time and fwGet the site sends right after
+     * auth (ble.ts fetchInfo), not on auth alone; waits up to [timeoutMs] for it.
+     */
+    suspend fun installedDials(timeoutMs: Long = 4000): List<Long>? {
+        if (reported == null) {
+            val now = System.currentTimeMillis() / 1000
+            val tz = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()).toLong() // ms, as tz * 1000
+            runCatching { send(StockCmd.TIME, buf { be32(now); be32(tz and 0xFFFF_FFFFL) }) }
+            runCatching { send(StockCmd.FW_GET, ByteArray(0)) }
+            runCatching { next(setOf(StockCmd.WF_INSTALLED), timeoutMs) }
+        }
+        return reported
+    }
+
+    /**
+     * Sets the dial list: the watch keeps the given ids it has, in this order, drops the rest, and shows `ids[active]`.
+     * It can't add a face. Reads the list again (the ack says nothing about what matched).
+     */
+    suspend fun setDials(ids: List<Long>, active: Int) {
+        send(StockCmd.WF_LIST, buf { u8(1); u8(active); u8(ids.size); u8(0); ids.forEach { le32(it) } })
+        next(setOf(StockCmd.WF_INSTALLED), 4000)
+        reported = null
+        send(StockCmd.WF_LIST, bytes(0))
+        next(setOf(StockCmd.WF_INSTALLED), 4000)
     }
 
     private suspend fun openSession(k1: ByteArray) {
