@@ -73,17 +73,24 @@ struct ContentView: View {
                     WatchStatus()
                         // the watch is usually there: read it on opening, as the Apps tab does
                         .task { if watch.phase == .idle { await watch.check() } }
+                        // a smaller top than the row's own 11
+                        .listRowInsets(EdgeInsets(top: 6, leading: 20, bottom: 11, trailing: 20))
                 } footer: {
                     Text("Keep the watch connected in Nothing X. The app only reads from it.")
                 }
-                FacesOnWatchSection()
+                // faces and firmware are the watch's: only while it is connected
+                if case .checked = watch.phase {
+                    FacesOnWatchSection()
+                }
                 Section {
-                    NavigationLink(value: Route.firmware) {
-                        HStack(spacing: 12) {
-                            SettingsIcon(symbol: "cpu.fill", color: .gray)
-                            Text("Firmware")
-                            Spacer()
-                            CountBadge(count: FirmwareModel.shared.updates(watch.loader))
+                    if case .checked = watch.phase {
+                        NavigationLink(value: Route.firmware) {
+                            HStack(spacing: 12) {
+                                SettingsIcon(symbol: "cpu.fill", color: .gray)
+                                Text("Firmware")
+                                Spacer()
+                                CountBadge(count: FirmwareModel.shared.updates(watch.loader))
+                            }
                         }
                     }
                     NavigationLink(value: Route.developer) {
@@ -124,7 +131,7 @@ struct ContentView: View {
             }
             .navigationTitle("FMC Companion")
             // updates are checked right after each connect: the Firmware row shows them
-            .task(id: watch.phase) { if case .checked = watch.phase { await FirmwareModel.shared.refresh() } }
+            .task(id: watch.phase) { if case .checked = watch.phase { await FirmwareModel.shared.refresh(account) } }
             .navigationDestination(for: Route.self) { route in
                 switch route {
                 case .firmware: FirmwareView()
@@ -158,10 +165,17 @@ struct WatchStatus: View {
 
     var body: some View {
         // the bezel is the layout: the same gap above it and to the button; case and strap get cut by both
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
             HStack(spacing: 16) {
                 WatchFrame(side: 76) {
-                    if let active { DialPicture(slot: active) } else { Color.black }
+                    // the face on screen once connected; till then what the app is doing
+                    switch watch.phase {
+                    case .checking: ProgressView().tint(.white)
+                    case .checked: if let active { DialPicture(slot: active) } else { Color.black }
+                    case .idle, .failed:
+                        Image(systemName: "antenna.radiowaves.left.and.right.slash")
+                            .font(.system(size: 22, weight: .medium)).foregroundStyle(.white.opacity(0.6))
+                    }
                 }
                 // the bezel lines up with the button's left edge; the case hangs out past it
                 .padding(.trailing, 16)
@@ -183,7 +197,6 @@ struct WatchStatus: View {
             // opaque while disabled: the strap runs under it
             .background(Color(.secondarySystemGroupedBackground), in: .capsule)
         }
-        .padding(.vertical, 2)
     }
 
     private var connected: Bool { if case .checked = watch.phase { true } else { false } }

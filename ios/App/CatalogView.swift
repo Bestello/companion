@@ -7,16 +7,23 @@ struct CatalogView: View {
     @Environment(Account.self) private var account
     @Environment(Catalog.self) private var catalog
     @Binding var path: [String]
-    @State private var mine = CommandLine.arguments.contains("-mine")
+    @State private var shelf: Shelf = CommandLine.arguments.contains("-mine") ? .mine : .all
     @State private var query = ""
+    @AppStorage("catalog-sort") private var sort: Sort = .new
+
+    enum Shelf: Hashable { case all, liked, mine }
+    /// fmc_frontend market.svelte SORT_OPTIONS (Top creators, a shelf of rails, left out)
+    enum Sort: String, CaseIterable { case new, popular, downloads }
+    private var mine: Bool { shelf == .mine }
 
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
                 if account.user != nil {
-                    Picker("Show", selection: $mine) {
-                        Text("Catalog").tag(false)
-                        Text("My watch faces").tag(true)
+                    Picker("Show", selection: $shelf) {
+                        Text("All").tag(Shelf.all)
+                        Text("Liked").tag(Shelf.liked)
+                        Text("Mine").tag(Shelf.mine)
                     }
                     .pickerStyle(.segmented)
                     .padding(.horizontal)
@@ -24,11 +31,27 @@ struct CatalogView: View {
                 grid
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle(mine ? "My watch faces" : "Watch faces")
+            .navigationTitle(mine ? "My watch faces" : shelf == .liked ? "Liked" : "Watch faces")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Picker("Sort", selection: $sort) {
+                            Text("Newest").tag(Sort.new)
+                            Text("Popular").tag(Sort.popular)
+                            Text("Most downloaded").tag(Sort.downloads)
+                        }
+                    } label: {
+                        Label("Sort", systemImage: "arrow.up.arrow.down")
+                    }
+                }
+            }
             .searchable(text: $query, prompt: "Name or author")
             .refreshable { await reload() }
             .task(id: account.user?.id) { await reload() }
-            .navigationDestination(for: String.self) { FaceDetail(id: $0) }
+            // ponytail: one String path for both pages, "user:<id>" for an author; a typed route if more come
+            .navigationDestination(for: String.self) { v in
+                if v.hasPrefix("user:") { AuthorView(id: String(v.dropFirst(5))) } else { FaceDetail(id: v) }
+            }
         }
     }
 
@@ -42,7 +65,7 @@ struct CatalogView: View {
             }
             .padding(.top, 80)
         } else {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 16)], spacing: 20) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
                 ForEach(faces) { face in
                     NavigationLink(value: face.id) { FaceCell(face: face) }
                         .buttonStyle(.plain)
@@ -53,40 +76,143 @@ struct CatalogView: View {
     }
 
     private var shown: [Watchface] {
-        let list = mine ? catalog.mine : catalog.all
+        var list = mine ? catalog.mine : catalog.all
+        if shelf == .liked { list = list.filter { catalog.liked($0, by: account.user) } }
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return list }
-        return list.filter { $0.name.localizedStandardContains(q) || ($0.author ?? "").localizedStandardContains(q) }
+        if !q.isEmpty {
+            list = list.filter { $0.name.localizedStandardContains(q) || ($0.author ?? "").localizedStandardContains(q) }
+        }
+        switch sort {
+        case .new: return list.sorted { $0.created > $1.created }
+        case .popular:
+            let counts = Dictionary(catalog.likes.map { ($0.watchface, 1) }, uniquingKeysWith: +)
+            return list.sorted { counts[$0.id, default: 0] > counts[$1.id, default: 0] }
+        case .downloads: return list.sorted { $0.downloads > $1.downloads }
+        }
     }
 
     private var empty: LocalizedStringKey {
         if catalog.error != nil { "Couldn't load watch faces" }
         else if !query.isEmpty { "Nothing found" }
         else if mine { "No watch faces yet" }
+        else if shelf == .liked { "No liked watch faces" }
         else { "Loading…" }
     }
 
     private func reload() async {
         if account.user != nil { await catalog.loadMine(account) }
+        async let likes: Void = catalog.loadLikes()
         await catalog.load()
+        await likes
     }
 }
 
-/// A round preview with the name and author under it.
+/// As fmc.tools' watchface-card: the dial, its name, the author, then downloads, likes and the type.
 struct FaceCell: View {
+    @Environment(Catalog.self) private var catalog
+    @Environment(Account.self) private var account
     let face: Watchface
 
     var body: some View {
-        VStack(spacing: 8) {
-            FacePreview(url: face.previewURL)
-            VStack(spacing: 2) {
-                Text(face.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                Text(face.published ? face.author ?? " " : String(localized: "Draft"))
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        VStack(alignment: .leading, spacing: 8) {
+            FacePreview(url: face.previewURL).padding(.bottom, 2)
+            Text(face.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+            if !face.published {
+                Text("Draft").font(.caption).foregroundStyle(.secondary)
+            } else if let author = face.author {
+                HStack(spacing: 6) {
+                    Avatar(url: face.authorAvatar, name: author, side: 18)
+                    Text(author).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
+            HStack(spacing: 12) {
+                Label(compact(face.downloads), systemImage: "arrow.down.circle")
+                LikeButton(face: face)
+                Spacer(minLength: 0)
+                if let type = face.type, !type.isEmpty {
+                    Text(type).font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(.tertiarySystemFill), in: .capsule)
+                }
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
         }
-        .accessibilityElement(children: .combine)
+        .padding(10)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 18, style: .continuous))
     }
+}
+
+/// A creator's page, as fmc.tools /user/<id>: avatar, name, totals, then their published faces.
+struct AuthorView: View {
+    @Environment(Catalog.self) private var catalog
+    let id: String
+
+    var body: some View {
+        let faces = catalog.all.filter { $0.ownerId == id }.sorted { $0.created > $1.created }
+        let owner = faces.first?.expand?.owner
+        ScrollView {
+            VStack(spacing: 8) {
+                Avatar(url: owner?.avatarURL, name: owner?.name ?? "?", side: 80)
+                Text(owner?.name ?? "").font(.title2.bold())
+                Text("\(faces.count) watch faces · \(compact(faces.map(\.downloads).reduce(0, +))) downloads · \(compact(faces.map(catalog.likeCount).reduce(0, +))) likes")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                Link("Open on fmc.tools", destination: Account.base.appending(path: "user/\(id)")).font(.subheadline)
+            }
+            .padding(.top, 8)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+                ForEach(faces) { face in
+                    NavigationLink(value: face.id) { FaceCell(face: face) }.buttonStyle(.plain)
+                }
+            }
+            .padding()
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle(owner?.name ?? "")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { if catalog.all.isEmpty { await catalog.load() } }
+    }
+}
+
+/// The heart and the count; a tap likes or unlikes when signed in.
+struct LikeButton: View {
+    @Environment(Catalog.self) private var catalog
+    @Environment(Account.self) private var account
+    let face: Watchface
+
+    var body: some View {
+        let liked = catalog.liked(face, by: account.user)
+        Button {
+            Task { await catalog.toggleLike(face, account: account) }
+        } label: {
+            Label(compact(catalog.likeCount(face)), systemImage: liked ? "heart.fill" : "heart")
+                .foregroundStyle(liked ? Color.red : Color.secondary)
+        }
+        .buttonStyle(.plain)
+        .disabled(account.user == nil)
+    }
+}
+
+/// A round avatar, else the name's first letter.
+struct Avatar: View {
+    let url: URL?
+    let name: String
+    var side: CGFloat = 24
+
+    var body: some View {
+        AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: {
+            Text(name.prefix(1).uppercased()).font(.system(size: side * 0.5, weight: .semibold))
+                .foregroundStyle(Color.fmcOnAccent)
+        }
+        .frame(width: side, height: side)
+        .background(Color.fmcAccent)
+        .clipShape(.circle)
+    }
+}
+
+/// 1234 → "1.2K", as fmc.tools' compact().
+func compact(_ n: Int) -> String {
+    n.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
 }
 
 /// The watch's 466×466 round panel.
@@ -137,7 +263,16 @@ struct FaceDetail: View {
                         FacePreview(url: face.previewURL).frame(maxWidth: 240)
                         VStack(spacing: 4) {
                             Text(face.name).font(.title2.bold()).multilineTextAlignment(.center)
-                            if let author = face.author { Text(author).foregroundStyle(.secondary) }
+                            if let author = face.author, let owner = face.ownerId {
+                                // a button in a List row: plain, so only the author is the tap target
+                                NavigationLink(value: "user:\(owner)") {
+                                    HStack(spacing: 8) {
+                                        Avatar(url: face.authorAvatar, name: author, side: 24)
+                                        Text(author).foregroundStyle(.secondary)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                         install(face)
                     }
@@ -149,6 +284,7 @@ struct FaceDetail: View {
                 }
                 Section {
                     LabeledContent("Downloads", value: "\(face.downloads)")
+                    LabeledContent("Likes") { LikeButton(face: face) }
                     Link(destination: face.pageURL) { Label("Open on fmc.tools", systemImage: "safari") }
                 }
                 if !face.description.isEmpty {
@@ -211,6 +347,7 @@ struct FaceDetail: View {
         }
         .task(id: id) {
             do { face = try await catalog.face(id, account: account) } catch { self.error = error.localizedDescription }
+            if catalog.likes.isEmpty { await catalog.loadLikes() }
         }
     }
 

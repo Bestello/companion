@@ -72,17 +72,18 @@ object FirmwareModel {
 
     fun updates(state: LoaderState?) = (if (loaderUpdate(state)) 1 else 0) + (if (firmwareUpdate(state)) 1 else 0)
 
-    suspend fun refresh() {
+    /** [token]: a moderator's sign-in also lists the drafts, as fmc.tools does (fmc_pocketbase's list rule decides). */
+    suspend fun refresh(token: String? = null) {
         if (checking) return
         checking = true
         try {
             fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
-            val filter = enc("published = true && device = 'watch_pro_2' && (kind = 'patched' || kind = 'loader')")
+            val filter = enc("device = 'watch_pro_2' && (kind = 'patched' || kind = 'loader')")
             val items = JSONObject(http("GET", "$FMC/api/collections/firmwares/records?filter=$filter&sort=-updated" +
-                "&fields=id,collectionId,name,kind,version,image,stub")).getJSONArray("items")
+                "&fields=id,collectionId,name,kind,version,image,stub,published", token = token)).getJSONArray("items")
             val records = (0 until items.length()).map(items::getJSONObject)
             fun release(kind: String) = records.firstOrNull { it.optString("kind") == kind }?.let {
-                Release(it.optString("name"), it.optString("version"), it.optLong("stub"),
+                Release(it.optString("name") + if (it.optBoolean("published")) "" else " (draft)", it.optString("version"), it.optLong("stub"),
                     "$FMC/api/files/${it.getString("collectionId")}/${it.getString("id")}/${it.getString("image")}")
             }
             val loader = release("loader")
@@ -131,7 +132,7 @@ fun FirmwareScreen(model: AppModel, back: () -> Unit) {
     val fm = FirmwareModel
     val state = model.loader
     val connected = model.phase is Phase.Checked
-    LaunchedEffect(Unit) { if (fm.check == null) fm.refresh() }
+    LaunchedEffect(Unit) { if (fm.check == null) fm.refresh(model.account.token) }
 
     @Composable
     fun row(label: String, detail: String? = null, value: @Composable () -> Unit) =
@@ -185,7 +186,7 @@ fun FirmwareScreen(model: AppModel, back: () -> Unit) {
                         }
                         HorizontalDivider()
                     }
-                    Row(Modifier.fillMaxWidth().clickable(enabled = !fm.checking) { scope.launch { fm.refresh() } },
+                    Row(Modifier.fillMaxWidth().clickable(enabled = !fm.checking) { scope.launch { fm.refresh(model.account.token) } },
                         verticalAlignment = Alignment.CenterVertically) {
                         Text("Check for updates", Modifier.weight(1f))
                         if (fm.checking) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)

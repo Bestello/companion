@@ -34,6 +34,23 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         private set
     var catalogError by mutableStateOf<String?>(null)
         private set
+    /** Every like on fmc.tools: counts and the user's own. */
+    var likes by mutableStateOf<List<Catalog.Like>>(emptyList())
+        private set
+
+    fun likeCount(face: Watchface) = likes.count { it.watchface == face.id }
+    fun liked(face: Watchface) = user?.let { u -> likes.any { it.watchface == face.id && it.user == u.id } } ?: false
+
+    suspend fun loadLikes() { runCatching { Catalog.likes() }.onSuccess { likes = it } }
+
+    /** Likes or unlikes as the signed-in user, then reloads the likes (toggleLikeFx). */
+    suspend fun toggleLike(face: Watchface) {
+        val u = user ?: return
+        val mine = likes.firstOrNull { it.watchface == face.id && it.user == u.id }
+        likes = if (mine != null) likes - mine else likes + Catalog.Like("", u.id, face.id)
+        runCatching { if (mine != null) Catalog.unlike(mine.id, account.token) else Catalog.like(u.id, face.id, account.token) }
+        loadLikes()
+    }
     var phase by mutableStateOf<Phase>(Phase.Idle)
         private set
     /** Bumped after each read or change of the faces on the watch: what shows them reads them again. */
@@ -74,6 +91,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
             account.user?.let { mine = Catalog.mine(it.id, account.token) }
             all = Catalog.all()
             catalogError = null
+            loadLikes()
         } catch (e: Exception) {
             catalogError = e.message ?: "Couldn't load watch faces"
         }

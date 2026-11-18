@@ -43,24 +43,27 @@ import WireKit
 
     func updates(_ state: LoaderState?) -> Int { (loaderUpdate(state) ? 1 : 0) + (firmwareUpdate(state) ? 1 : 0) }
 
-    func refresh() async {
+    /// `account`: a moderator's sign-in also lists the drafts, as fmc.tools does (fmc_pocketbase's list rule decides).
+    func refresh(_ account: Account? = nil) async {
         guard !checking else { return }
         checking = true
         defer { checking = false }
         do {
             struct Page: Decodable { var items: [Record] }
-            struct Record: Decodable { var id, collectionId, name, kind, version, image: String; var stub: Int }
+            struct Record: Decodable { var id, collectionId, name, kind, version, image: String; var stub: Int; var published: Bool }
             var url = Account.base.appending(path: "api/collections/firmwares/records")
             url.append(queryItems: [
-                .init(name: "filter", value: "published = true && device = 'watch_pro_2' && (kind = 'patched' || kind = 'loader')"),
+                .init(name: "filter", value: "device = 'watch_pro_2' && (kind = 'patched' || kind = 'loader')"),
                 .init(name: "sort", value: "-updated"),
-                .init(name: "fields", value: "id,collectionId,name,kind,version,image,stub"),
+                .init(name: "fields", value: "id,collectionId,name,kind,version,image,stub,published"),
             ])
-            let (data, _) = try await URLSession.shared.data(from: url)
+            var r = URLRequest(url: url)
+            account?.authorize(&r)
+            let (data, _) = try await URLSession.shared.data(for: r)
             let records = try JSONDecoder().decode(Page.self, from: data).items
             func release(_ kind: String) -> Release? {
                 records.first { $0.kind == kind }.map {
-                    Release(name: $0.name, version: $0.version, stub: $0.stub,
+                    Release(name: $0.published ? $0.name : "\($0.name) (draft)", version: $0.version, stub: $0.stub,
                             file: Account.base.appending(path: "api/files/\($0.collectionId)/\($0.id)/\($0.image)"))
                 }
             }
@@ -114,6 +117,7 @@ import WireKit
 
 struct FirmwareView: View {
     @Environment(WatchModel.self) private var watch
+    @Environment(Account.self) private var account
     private var model = FirmwareModel.shared
 
     var body: some View {
@@ -169,7 +173,7 @@ struct FirmwareView: View {
                     }
                 }
                 Button {
-                    Task { await model.refresh() }
+                    Task { await model.refresh(account) }
                 } label: {
                     HStack {
                         Text("Check for updates")
@@ -190,7 +194,7 @@ struct FirmwareView: View {
             }
         }
         .navigationTitle("Firmware")
-        .task { if model.check == nil { await model.refresh() } }
+        .task { if model.check == nil { await model.refresh(account) } }
     }
 
     private var connected: Bool { if case .checked = watch.phase { true } else { false } }

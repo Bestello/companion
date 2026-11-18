@@ -12,6 +12,7 @@ import org.json.JSONObject
 data class Watchface(
     val id: String, val collectionId: String, val name: String, val description: String, val preview: String,
     val bin: String, val published: Boolean, val downloads: Int, val author: String?,
+    val created: String = "", val type: String = "", val authorAvatar: String? = null, val ownerId: String? = null,
 ) {
     val previewURL get() = file(preview)
     val binURL get() = file(bin)
@@ -24,12 +25,41 @@ data class Watchface(
             j.getString("id"), j.getString("collectionId"), j.optString("name"), j.optString("description"),
             j.optString("preview"), j.optString("bin"), j.optBoolean("published"), j.optInt("downloads"),
             j.optJSONObject("expand")?.optJSONObject("owner")?.optString("name"),
+            j.optString("created"), j.optString("type"),
+            j.optJSONObject("expand")?.optJSONObject("owner")?.let { o ->
+                o.optString("avatar").takeIf { it.isNotEmpty() }?.let { "$FMC/api/files/users/${o.getString("id")}/$it?thumb=100x100" }
+            },
+            j.optString("owner").takeIf { it.isNotEmpty() },
         )
     }
 }
 
 object Catalog {
     private const val RECORDS = "$FMC/api/collections/watchfaces/records"
+    private const val LIKES = "$FMC/api/collections/likes/records"
+
+    class Like(val id: String, val user: String, val watchface: String)
+
+    // ponytail: every like (a few thousand ids), as the site's getFullList; a count field on the face if it grows
+    suspend fun likes(): List<Like> {
+        val out = mutableListOf<Like>()
+        var page = 1
+        while (true) {
+            val p = JSONObject(http("GET", "$LIKES?page=$page&perPage=500&fields=id,user,watchface"))
+            val items = p.getJSONArray("items")
+            for (i in 0 until items.length()) items.getJSONObject(i).let { out += Like(it.getString("id"), it.getString("user"), it.getString("watchface")) }
+            if (page >= p.getInt("totalPages")) return out
+            page++
+        }
+    }
+
+    suspend fun like(user: String, face: String, token: String?) {
+        http("POST", LIKES, JSONObject().put("user", user).put("watchface", face), token)
+    }
+
+    suspend fun unlike(id: String, token: String?) {
+        http("DELETE", "$LIKES/$id", token = token)
+    }
 
     /** Published faces for the Watch Pro 2. Untagged ones count, as the site's matchesDevice: most predate `device`. */
     suspend fun all() = list("published = true && (device = '' || device = 'watch_pro_2')", "-created")

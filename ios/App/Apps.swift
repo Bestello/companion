@@ -243,7 +243,8 @@ struct AppsView: View {
     @State private var showAll = false
 
     var body: some View {
-        let apps = showAll ? WatchApp.store(watch.loader, perms) : WatchApp.all(watch.loader, perms)
+        // Installed is the watch's list: nothing until it is read, not the apps that only asked for something
+        let apps = showAll ? WatchApp.store(watch.loader, perms) : watch.loader == nil ? [] : WatchApp.all(watch.loader, perms)
         List {
             Section {
                 Picker("Show", selection: $showAll) {

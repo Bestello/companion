@@ -228,7 +228,8 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit) {
         if (bt && model.phase == Phase.Idle) model.check()
     }
     var showAll by remember { mutableStateOf(false) }
-    val apps = if (showAll) WatchApp.store(model.loader, grants) else WatchApp.all(model.loader, grants)
+    // Installed is the watch's list: nothing until it is read, not the apps that only asked for something
+    val apps = if (showAll) WatchApp.store(model.loader, grants) else if (model.loader == null) emptyList() else WatchApp.all(model.loader, grants)
     Column {
         Bar("Apps")
         LazyColumn {

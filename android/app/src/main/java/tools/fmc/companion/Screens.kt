@@ -1,5 +1,8 @@
 package tools.fmc.companion
 
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.requiredSize
@@ -119,7 +122,11 @@ import tools.fmc.companion.wire.FaceVerdict
 /** Where the app is: a tab, and a face or the sign-in page on top of it. */
 class Nav {
     var tab by mutableStateOf(0)
-    var face by mutableStateOf<String?>(null)
+    /** The catalog's pages over its grid: face ids, "user:<id>" for an author. */
+    val pages = mutableStateListOf<String>()
+    var face: String?
+        get() = pages.lastOrNull()
+        set(v) { if (v == null) pages.removeLastOrNull() else pages.add(v) }
     var signingIn by mutableStateOf(false)
     /** A watch app's page, over Apps or straight from its ask notification. */
     var app by mutableStateOf<String?>(null)
@@ -127,7 +134,7 @@ class Nav {
     var firmware by mutableStateOf(false)
 
     /** Back to the tab's root. */
-    fun root() { face = null; signingIn = false; app = null; developer = false; firmware = false }
+    fun root() { pages.clear(); signingIn = false; app = null; developer = false; firmware = false }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -165,7 +172,8 @@ fun App(model: AppModel, nav: Nav) {
                 nav.app != null -> AppScreen(model, nav.app!!) { nav.app = null }
                 nav.developer -> DeveloperScreen { nav.developer = false }
                 nav.firmware -> FirmwareScreen(model) { nav.firmware = false }
-                nav.face != null -> FaceScreen(model, nav.face!!) { nav.face = null }
+                nav.face?.startsWith("user:") == true -> AuthorScreen(model, nav.face!!.removePrefix("user:"), { nav.face = it }) { nav.face = null }
+                nav.face != null -> FaceScreen(model, nav.face!!, { nav.face = "user:$it" }) { nav.face = null }
                 nav.tab == 0 -> CatalogScreen(model) { nav.face = it }
                 nav.tab == 2 -> AppsScreen(model) { nav.app = it }
                 else -> WatchScreen(model, nav) { nav.signingIn = true }
@@ -203,27 +211,50 @@ private fun withBluetooth(action: () -> Unit): () -> Unit {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CatalogScreen(model: AppModel, open: (String) -> Unit) {
-    var showMine by rememberSaveable { mutableStateOf(false) }
+    // 0 all, 1 liked, 2 mine
+    var shelf by rememberSaveable { mutableIntStateOf(0) }
+    // fmc_frontend market.svelte SORT_OPTIONS (Top creators, a shelf of rails, left out)
+    var sort by rememberSaveable { mutableIntStateOf(0) }
+    var sorting by remember { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     var refreshing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val list = if (showMine && model.user != null) model.mine else model.all
+    val signedIn = model.user != null
+    val showMine = signedIn && shelf == 2
+    var list = if (showMine) model.mine else model.all
+    if (signedIn && shelf == 1) list = list.filter(model::liked)
     val q = query.trim()
-    val shown = if (q.isEmpty()) list else list.filter {
+    if (q.isNotEmpty()) list = list.filter {
         it.name.contains(q, ignoreCase = true) || (it.author ?: "").contains(q, ignoreCase = true)
     }
+    val counts = remember(model.likes) { model.likes.groupingBy { it.watchface }.eachCount() }
+    val shown = when (sort) {
+        1 -> list.sortedByDescending { counts[it.id] ?: 0 }
+        2 -> list.sortedByDescending { it.downloads }
+        else -> list.sortedByDescending { it.created }
+    }
     Column {
-        Bar(if (showMine) "My watch faces" else "Watch faces")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { Bar(if (showMine) "My watch faces" else if (signedIn && shelf == 1) "Liked" else "Watch faces") }
+            Box {
+                TextButton({ sorting = true }) { Text(listOf("Newest", "Popular", "Most downloaded")[sort]) }
+                DropdownMenu(sorting, { sorting = false }) {
+                    listOf("Newest", "Popular", "Most downloaded").forEachIndexed { i, label ->
+                        DropdownMenuItem({ Text(label, fontWeight = if (i == sort) FontWeight.SemiBold else null) }, { sort = i; sorting = false })
+                    }
+                }
+            }
+        }
         PullToRefreshBox(refreshing, { scope.launch { refreshing = true; model.reload(); refreshing = false } }) {
             LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                verticalArrangement = Arrangement.spacedBy(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         if (model.user != null) {
                             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                                listOf("Catalog", "My watch faces").forEachIndexed { i, label ->
-                                    SegmentedButton(showMine == (i == 1), { showMine = i == 1 },
-                                        SegmentedButtonDefaults.itemShape(i, 2)) { Text(label) }
+                                listOf("All", "Liked", "Mine").forEachIndexed { i, label ->
+                                    SegmentedButton(shelf == i, { shelf = i },
+                                        SegmentedButtonDefaults.itemShape(i, 3)) { Text(label) }
                                 }
                             }
                         }
@@ -237,23 +268,97 @@ fun CatalogScreen(model: AppModel, open: (String) -> Unit) {
                             model.catalogError != null -> "Couldn't load watch faces\n${model.catalogError}"
                             q.isNotEmpty() -> "Nothing found"
                             showMine -> "No watch faces yet"
+                            signedIn && shelf == 1 -> "No liked watch faces"
                             else -> "Loading…"
                         }
                         Text(empty, Modifier.padding(top = 80.dp), color = Fmc.secondary, textAlign = TextAlign.Center)
                     }
                 }
-                items(shown, key = { it.id }) { face ->
-                    Column(Modifier.clickable { open(face.id) }, horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FacePreview(face.previewURL, Modifier.fillMaxWidth())
-                        Text(face.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(if (face.published) face.author ?: " " else "Draft", style = MaterialTheme.typography.bodySmall,
-                            color = Fmc.secondary, maxLines = 1)
-                    }
-                }
+                items(shown, key = { it.id }) { face -> FaceCard(model, face) { open(face.id) } }
             }
         }
     }
+}
+
+/** As fmc.tools' watchface-card: the dial, its name, the author, then downloads, likes and the type. */
+@Composable
+fun FaceCard(model: AppModel, face: Watchface, open: () -> Unit) =
+    Surface(Modifier.clickable(onClick = open), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            FacePreview(face.previewURL, Modifier.fillMaxWidth().padding(bottom = 2.dp))
+            Text(face.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (!face.published) Text("Draft", style = MaterialTheme.typography.bodySmall, color = Fmc.secondary)
+            else face.author?.let { author ->
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Avatar(face.authorAvatar, author, 18.dp)
+                    Text(author, style = MaterialTheme.typography.bodySmall, color = Fmc.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("↓ ${compact(face.downloads)}", style = MaterialTheme.typography.bodySmall, color = Fmc.secondary)
+                LikeButton(model, face)
+                Spacer(Modifier.weight(1f))
+                if (face.type.isNotEmpty()) Text(face.type, Modifier.clip(CircleShape).background(Fmc.secondary.copy(alpha = 0.12f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+
+/** A creator's page, as fmc.tools /user/<id>: avatar, name, totals, then their published faces. */
+@Composable
+fun AuthorScreen(model: AppModel, id: String, open: (String) -> Unit, back: () -> Unit) {
+    val context = LocalContext.current
+    val faces = model.all.filter { it.ownerId == id }.sortedByDescending { it.created }
+    val first = faces.firstOrNull()
+    Column {
+        Bar(first?.author ?: "", back)
+        LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Avatar(first?.authorAvatar, first?.author ?: "?", 80.dp)
+                    Text(first?.author ?: "", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text("${faces.size} watch faces · ${compact(faces.sumOf { it.downloads })} downloads · " +
+                        "${compact(faces.sumOf { model.likeCount(it) })} likes", color = Fmc.secondary)
+                    TextButton({ context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("$FMC/user/$id"))) }) { Text("Open on fmc.tools") }
+                }
+            }
+            items(faces, key = { it.id }) { face -> FaceCard(model, face) { open(face.id) } }
+        }
+    }
+}
+
+/** The heart and the count; a tap likes or unlikes when signed in. */
+@Composable
+fun LikeButton(model: AppModel, face: Watchface) {
+    val scope = rememberCoroutineScope()
+    val liked = model.liked(face)
+    Row(Modifier.clip(CircleShape).clickable(enabled = model.user != null) { scope.launch { model.toggleLike(face) } },
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        Icon(if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null, Modifier.size(15.dp),
+            tint = if (liked) Color(0xFFE5484D) else Fmc.secondary)
+        Text(compact(model.likeCount(face)), style = MaterialTheme.typography.bodySmall, color = Fmc.secondary)
+    }
+}
+
+/** A round avatar, else the name's first letter. */
+@Composable
+fun Avatar(url: String?, name: String, side: Dp) {
+    val bitmap = rememberImage(url)
+    Surface(Modifier.size(side), shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
+        if (bitmap != null) Image(bitmap, null, Modifier.size(side), contentScale = ContentScale.Crop)
+        else Box(contentAlignment = Alignment.Center) {
+            Text(name.take(1).uppercase(), fontSize = (side.value * 0.5f).sp, color = MaterialTheme.colorScheme.onPrimary)
+        }
+    }
+}
+
+/** 1234 → "1.2K", as fmc.tools' compact(). */
+fun compact(n: Int): String = when {
+    n >= 1_000_000 -> "%.1fM".format(n / 1_000_000.0).replace(".0M", "M")
+    n >= 1_000 -> "%.1fK".format(n / 1_000.0).replace(".0K", "K")
+    else -> "$n"
 }
 
 /** A face on the watch as Nothing X and fmc.tools show it: its round preview and name; the active one ringed yellow. */
@@ -298,7 +403,7 @@ fun DialTile(model: AppModel, slot: DialSlot, modifier: Modifier = Modifier, act
 }
 
 @Composable
-fun FaceScreen(model: AppModel, id: String, back: () -> Unit) {
+fun FaceScreen(model: AppModel, id: String, author: (String) -> Unit = {}, back: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var face by remember(id) { mutableStateOf<Watchface?>(null) }
@@ -375,7 +480,14 @@ fun FaceScreen(model: AppModel, id: String, back: () -> Unit) {
                             FacePreview(f.previewURL, Modifier.widthIn(max = 240.dp).fillMaxWidth())
                             Text(f.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,
                                 textAlign = TextAlign.Center)
-                            f.author?.let { Text(it, color = Fmc.secondary) }
+                            f.author?.let { name ->
+                                Row(Modifier.clip(CircleShape).clickable(enabled = f.ownerId != null) { f.ownerId?.let(author) }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Avatar(f.authorAvatar, name, 24.dp)
+                                    Text(name, color = Fmc.secondary)
+                                }
+                            }
                             val p = progress
                             if (p != null) {
                                 Text("Installing…")
@@ -392,6 +504,8 @@ fun FaceScreen(model: AppModel, id: String, back: () -> Unit) {
                     item {
                         Section {
                             Row { Text("Downloads", Modifier.weight(1f)); Text("${f.downloads}", color = Fmc.secondary) }
+                            HorizontalDivider()
+                            Row(verticalAlignment = Alignment.CenterVertically) { Text("Likes", Modifier.weight(1f)); LikeButton(model, f) }
                             HorizontalDivider()
                             Text("Open on fmc.tools", Modifier.fillMaxWidth().clickable {
                                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(f.pageURL)))
@@ -497,7 +611,8 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
                     LaunchedEffect(Unit) { if (model.phase is Phase.Idle) check() }
                 }
             }
-            item {
+            // faces and firmware are the watch's: only while it is connected
+            if (model.phase is Phase.Checked) item {
                 var reading by remember { mutableStateOf(false) }
                 var readError by remember { mutableStateOf<String?>(null) }
                 suspend fun read(bind: Boolean, retry: Boolean = true) {
@@ -584,12 +699,14 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
             }
             item {
                 // updates are checked right after each connect: the Firmware row shows them
-                LaunchedEffect(model.phase) { if (model.phase is Phase.Checked) FirmwareModel.refresh() }
+                LaunchedEffect(model.phase) { if (model.phase is Phase.Checked) FirmwareModel.refresh(model.account.token) }
                 Section {
-                    NavRow("Firmware", count = FirmwareModel.updates(model.loader), onClick = { nav.firmware = true }) {
-                        IconTile(painterResource(R.drawable.ic_memory), Color(0xFF757575))
+                    if (model.phase is Phase.Checked) {
+                        NavRow("Firmware", count = FirmwareModel.updates(model.loader), onClick = { nav.firmware = true }) {
+                            IconTile(painterResource(R.drawable.ic_memory), Color(0xFF757575))
+                        }
+                        HorizontalDivider()
                     }
-                    HorizontalDivider()
                     NavRow("Developer", onClick = { nav.developer = true }) { IconTile(Icons.Default.Build, Color(0xFF757575)) }
                 }
             }
@@ -656,7 +773,7 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
 private fun WatchStatus(model: AppModel, check: () -> Unit) {
     val phase = model.phase
     // the bezel is the layout: the same gap above it and to the button; case and strap get cut by both
-    Column(Modifier.padding(vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.padding(bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             val context = LocalContext.current
             val on = remember(model.facesRead) { facesOnWatch(context) }
@@ -664,7 +781,14 @@ private fun WatchStatus(model: AppModel, check: () -> Unit) {
             // a shorter row than the bezel: the card's top and the button below cut into the watch
             // the bezel lines up with the button's left edge; the case hangs out past it
             WatchFrame(76.dp, Modifier.padding(end = 16.dp)) {
-                if (active != null) DialPicture(model, active, Modifier.fillMaxSize())
+                // the face on screen once connected; till then what the app is doing
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    when (phase) {
+                        Phase.Checking -> CircularProgressIndicator(Modifier.size(22.dp), color = Color.White, strokeWidth = 2.dp)
+                        is Phase.Checked -> if (active != null) DialPicture(model, active, Modifier.fillMaxSize())
+                        else -> Icon(painterResource(R.drawable.ic_watch), null, Modifier.size(24.dp), tint = Color.White.copy(alpha = 0.6f))
+                    }
+                }
             }
             Column {
                 val title = when (phase) {
