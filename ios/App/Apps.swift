@@ -109,8 +109,9 @@ func versionText(_ v: UInt32) -> String { v >= 1024 ? "\(v >> 20).\(v >> 10 & 10
     func listing(_ package: String) -> Listing? { byKey[package.lowercased()] }
     func latest(_ package: String) -> PackageHeader? { listing(package).flatMap { headers[$0.slug] } }
 
-    func load() async {
-        guard !loaded else { return }
+    /// The store's apps, once; `force` (pull to refresh) reads them again.
+    func load(force: Bool = false) async {
+        guard force || !loaded else { return }
         struct Page: Decodable { var items: [Record] }
         struct Record: Decodable {
             var id, collectionId, slug, name, icon: String
@@ -121,9 +122,11 @@ func versionText(_ v: UInt32) -> String { v >= 1024 ? "\(v >> 20).\(v >> 10 & 10
         var url = Account.base.appending(path: "api/collections/apps/records")
         url.append(queryItems: [.init(name: "filter", value: "published = true"), .init(name: "perPage", value: "200"),
                                 .init(name: "fields", value: "id,collectionId,slug,name,icon,package,summary,description,author,version,abi,source,updated,downloads,screenshots")])
-        guard let (data, _) = try? await URLSession.shared.data(from: url),
+        // past URLCache: an app hidden or shown in the store shows here on the next refresh
+        guard let (data, _) = try? await URLSession.shared.data(for: URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)),
               let page = try? JSONDecoder().decode(Page.self, from: data) else { return }
         loaded = true
+        var byKey: [String: Listing] = [:], all: [Listing] = []
         for r in page.items {
             // ponytail: SVG icons have no image decoder here, those apps keep the letter tile
             let files = Account.base.appending(path: "api/files/\(r.collectionId)/\(r.id)")
@@ -138,6 +141,7 @@ func versionText(_ v: UInt32) -> String { v >= 1024 ? "\(v >> 20).\(v >> 10 & 10
             all.append(l)
         }
         all.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        (self.byKey, self.all) = (byKey, all)
         // ponytail: one 64-byte request per store app, a few dozen at most; a field with the header's u32 on the
         // store record would make this one request
         headers = await withTaskGroup(of: (String, PackageHeader)?.self) { group in
@@ -344,7 +348,11 @@ struct AppsView: View {
         .task { await StoreApps.shared.load() }
         // the list of installed apps is the watch's: read it here too, not only from Connect on the Watch tab
         .task { if watch.phase == .idle { await watch.check() } }
-        .refreshable { await watch.check() }
+        .refreshable {
+            async let store: () = StoreApps.shared.load(force: true)
+            await watch.check()
+            await store
+        }
     }
 
     @ViewBuilder private func installed(_ apps: [WatchApp]) -> some View {
