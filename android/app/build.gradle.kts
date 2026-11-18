@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -13,12 +15,27 @@ android {
         // Android 12: BLUETOOTH_SCAN/CONNECT without the location permission.
         minSdk = 31
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI passes -PversionCode/-PversionName (.github/workflows/android-release.yml): every release counts up
+        versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 1
+        versionName = findProperty("versionName") as String? ?: "0.1.0"
+    }
+
+    // The release key, outside the repo: android/keystore.properties (file, storePassword, keyAlias, keyPassword).
+    // Every update must be signed with it; lose it and users reinstall.
+    val keys = rootProject.file("keystore.properties").takeIf { it.exists() }
+        ?.let { f -> Properties().apply { f.inputStream().use { load(it) } } }
+    keys?.let { k ->
+        signingConfigs.create("release") {
+            storeFile = file(k.getProperty("file"))
+            storePassword = k.getProperty("storePassword")
+            keyAlias = k.getProperty("keyAlias")
+            keyPassword = k.getProperty("keyPassword")
+        }
     }
 
     buildTypes {
         release {
+            keys?.let { signingConfig = signingConfigs.getByName("release") }
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
         }
@@ -54,6 +71,7 @@ dependencies {
     implementation(libs.activity.compose)
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.coroutines.android)
+    implementation(libs.markdown.m3)
 
     testImplementation(libs.junit)
     testImplementation(kotlin("test"))

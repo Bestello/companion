@@ -88,3 +88,8 @@ public func install(_ s: Requester, package: Data, progress: @Sendable (Double) 
     _ = try check(try await s.call(Cmd.end, Data([0])))
     return slot
 }
+
+/// Removes the app in `slot` with its data (stub DELETE). `busy` while that app runs on the watch.
+public func remove(_ s: Requester, slot: Int) async throws {
+    _ = try check(try await s.call(Cmd.delete, Data([UInt8(slot)])))
+}

@@ -22,6 +22,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import tools.fmc.companion.wire.DataUuid
 import tools.fmc.companion.wire.Link
+import tools.fmc.companion.wire.OtaUuid
 import tools.fmc.companion.wire.Uuid
 import tools.fmc.companion.wire.sha256Hex
 
@@ -59,6 +60,10 @@ class BleLink(private val context: Context) : Link {
     var watchId: String? = null
         private set
 
+    /** The advertised name ("CMF Watch Pro 2-1A2B"): the only model id there is. */
+    var watchName: String? = null
+        private set
+
     /**
      * The watch Nothing X keeps connected, else the bonded one (the system connects it for us); with `scan`, as a
      * last resort the one advertising "CMF Watch…" within 10 s.
@@ -73,6 +78,7 @@ class BleLink(private val context: Context) : Link {
             ?: (if (scan) scan() else null)
             ?: throw BleError.noWatch
         watchId = sha256Hex(device.address).take(16)
+        watchName = device.name
         // connected → MTU → services → every notify on
         dropped = false
         gattStep(Op.CONNECT) { gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE) }
@@ -212,8 +218,8 @@ class BleLink(private val context: Context) : Link {
         val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
         val REQUIRED = listOf(Uuid.CMD_WRITE, Uuid.CMD_NOTIFY, Uuid.SHELL_WRITE, Uuid.SHELL_NOTIFY)
 
-        /** The stock upload pair: only the watchface install needs it. */
-        val KNOWN = REQUIRED + listOf(DataUuid.WRITE, DataUuid.NOTIFY)
-        val NOTIFIES = listOf(Uuid.CMD_NOTIFY, Uuid.SHELL_NOTIFY, DataUuid.NOTIFY)
+        /** The stock upload pair (watchface install) and the firmware update's: only those need them. */
+        val KNOWN = REQUIRED + listOf(DataUuid.WRITE, DataUuid.NOTIFY, OtaUuid.WRITE, OtaUuid.NOTIFY)
+        val NOTIFIES = listOf(Uuid.CMD_NOTIFY, Uuid.SHELL_NOTIFY, DataUuid.NOTIFY, OtaUuid.NOTIFY)
     }
 }

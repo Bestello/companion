@@ -2,10 +2,17 @@ import Foundation
 import Observation
 
 // FMC catalog: PocketBase `watchfaces` at fmc.tools, as fmc_frontend modules/market/model/market.api.ts
-// (loadMarketFx, loadMyFx, loadWatchfaceFx). Read only; likes, publishing and the editor stay on the site.
+// (loadMarketFx, loadMyFx, loadWatchfaceFx, toggleLikeFx). Publishing and the editor stay on the site.
 
 struct Watchface: Decodable, Identifiable, Hashable {
-    struct Owner: Decodable, Hashable { var name: String }
+    struct Owner: Decodable, Hashable {
+        var id: String
+        var name: String
+        var avatar: String?
+        var avatarURL: URL? {
+            avatar.flatMap { $0.isEmpty ? nil : Account.base.appending(path: "api/files/users/\(id)/\($0)").appending(queryItems: [.init(name: "thumb", value: "100x100")]) }
+        }
+    }
     struct Expand: Decodable, Hashable { var owner: Owner? }
 
     var id: String
@@ -16,9 +23,24 @@ struct Watchface: Decodable, Identifiable, Hashable {
     var bin: String
     var published: Bool
     var downloads: Int
+    var created: String
+    /// "Analog", "Digital", …; "" for most
+    var type: String?
+    /// "watch_pro_2", "watch_3_pro", …; "" for most, which count as Watch Pro 2 (the site's matchesDevice)
+    var device: String?
     var expand: Expand?
 
+    /// Made for another watch: the name to warn with, nil for the Watch Pro 2 and untagged faces.
+    var otherDevice: String? {
+        guard let d = device, !d.isEmpty, d != "watch_pro_2" else { return nil }
+        return Self.devices[d] ?? d
+    }
+    /// fmc_frontend deviceLabel
+    static let devices = ["watch_pro": "Watch Pro", "watch_3_pro": "Watch 3 Pro"]
+
     var author: String? { expand?.owner?.name }
+    var authorAvatar: URL? { expand?.owner?.avatarURL }
+    var ownerId: String? { expand?.owner?.id }
     var previewURL: URL? { file(preview) }
     var binURL: URL? { file(bin) }
     var pageURL: URL { Account.base.appending(path: "market/\(id)") }
@@ -29,16 +51,49 @@ struct Watchface: Decodable, Identifiable, Hashable {
 }
 
 @MainActor @Observable final class Catalog {
-    /// Published faces for the Watch Pro 2. Untagged ones count as Watch Pro 2, as the site's
-    /// matchesDevice does: most of the catalog predates the `device` field.
+    /// Every published face, for any watch: a face for another one says so on its page (`otherDevice`).
     private(set) var all: [Watchface] = []
     /// The signed-in user's own faces, drafts included (loadMyFx).
     private(set) var mine: [Watchface] = []
     private(set) var error: String?
+    /// Every like on fmc.tools (the site loads them whole too): counts and the user's own.
+    private(set) var likes: [Like] = []
+
+    struct Like: Decodable, Hashable { var id, user, watchface: String }
+
+    func likeCount(_ face: Watchface) -> Int { likes.lazy.filter { $0.watchface == face.id }.count }
+    func liked(_ face: Watchface, by user: User?) -> Bool {
+        user.map { u in likes.contains { $0.watchface == face.id && $0.user == u.id } } ?? false
+    }
+
+    func loadLikes() async {
+        // ponytail: every like (a few thousand ids), as the site's getFullList; a count field on the face if it grows
+        if let l: [Like] = try? await Self.all(Self.likesURL, fields: "id,user,watchface") { likes = l }
+    }
+
+    /// Likes or unlikes as the signed-in user, then reloads the likes (toggleLikeFx).
+    func toggleLike(_ face: Watchface, account: Account) async {
+        guard let user = account.user else { return }
+        var r: URLRequest
+        if let mine = likes.first(where: { $0.watchface == face.id && $0.user == user.id }) {
+            r = URLRequest(url: Self.likesURL.appending(path: mine.id))
+            r.httpMethod = "DELETE"
+            likes.removeAll { $0.id == mine.id }
+        } else {
+            r = URLRequest(url: Self.likesURL)
+            r.httpMethod = "POST"
+            r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            r.httpBody = try? JSONEncoder().encode(["user": user.id, "watchface": face.id])
+            likes.append(Like(id: "", user: user.id, watchface: face.id))
+        }
+        account.authorize(&r)
+        _ = try? await URLSession.shared.data(for: r)
+        await loadLikes()
+    }
 
     func load() async {
         do {
-            all = try await Self.list(filter: "published = true && (device = '' || device = 'watch_pro_2')", sort: "-created")
+            all = try await Self.list(filter: "published = true", sort: "-created")
             error = nil
         } catch {
             if !Self.cancelled(error) { self.error = error.localizedDescription }
@@ -70,6 +125,23 @@ struct Watchface: Decodable, Identifiable, Hashable {
     }
 
     private static let records = Account.base.appending(path: "api/collections/watchfaces/records")
+    private static let likesURL = Account.base.appending(path: "api/collections/likes/records")
+
+    private struct Page<T: Decodable>: Decodable { var items: [T]; var totalPages: Int }
+
+    private static func all<T: Decodable>(_ url: URL, fields: String) async throws -> [T] {
+        var out: [T] = []
+        var page = 1
+        while true {
+            let p: Page<T> = try await get(URLRequest(url: url.appending(queryItems: [
+                .init(name: "page", value: "\(page)"), .init(name: "perPage", value: "500"),
+                .init(name: "fields", value: fields), .init(name: "skipTotal", value: "0"),
+            ])))
+            out += p.items
+            guard page < p.totalPages else { return out }
+            page += 1
+        }
+    }
 
     // ponytail: whole list in 500-record pages, as the site's getFullList; a few hundred faces. Real
     // paging when the catalog grows into the thousands.

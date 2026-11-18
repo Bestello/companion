@@ -6,3 +6,5 @@ xcuserdata/
 .swiftpm/
 build/
 local.mk
+keystore.properties
+*.jks

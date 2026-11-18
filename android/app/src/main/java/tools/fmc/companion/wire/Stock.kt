@@ -21,9 +21,17 @@ object StockCmd {
     val WF_INIT1_REQ = k(0x8052); val WF_INIT1_REP = k(0x0052); val WF_INIT2_REQ = k(0x9075); val WF_INIT2_REP = k(0xA075)
     val WF_CHUNK_REQ = k(0xA064); val WF_CHUNK_WRITE = k(0x9064); val WF_FINISH_ACK1 = k(0xA065)
     val WF_FINISH_ACK2 = k(0x9065); val WF_INSTALLED = k(0xA055)
+    /** get (`00`) or set (`01 ‖ active ‖ count ‖ 00 ‖ ids`) the dial list (cmf-watch-sdk docs/recon.md, "Stock watch faces") */
+    val WF_LIST = k(0x9055)
+    /** ble-protocol.ts `time`, `fwGet` */
+    val TIME = k(0x8004); val FW_GET = k(0x8006)
+    /** The firmware update (ble.ts flashFirmware, cmf-watch-sdk docs/ota.md). a043/a044 end it, meaning undocumented. */
+    val OTA_BEGIN_REQ = k(0x9052); val OTA_BEGIN_REP = k(0xA052); val OTA_START_REQ = k(0x9040); val OTA_START_REP = k(0xA040)
+    val OTA_CHUNK_REQ = k(0xA042); val OTA_CHUNK_WRITE = k(0x9042); val OTA_VERDICT = k(0xA041); val OTA_COMMIT = k(0x9041)
+    val OTA_STATUS_43 = k(0xA043); val OTA_STATUS_44 = k(0xA044)
 
     /** Sent and read in the clear (body ‖ crc32le); `AUTH_FAILED` because the watch could not decrypt. */
-    val PLAIN = setOf(AUTH_PAIR_REQ, AUTH_PAIR_REP, WF_CHUNK_WRITE, AUTH_FAILED)
+    val PLAIN = setOf(AUTH_PAIR_REQ, AUTH_PAIR_REP, WF_CHUNK_WRITE, OTA_CHUNK_WRITE, AUTH_FAILED)
 
     /** What goes over the data pair (ffe1); everything else goes over fff2. */
     val DATA = setOf(WF_INIT1_REQ, WF_INIT2_REQ, WF_CHUNK_WRITE, WF_FINISH_ACK2)
@@ -40,13 +48,19 @@ object DataUuid {
     const val NOTIFY = "02F00000-0000-0000-0000-00000000FFE2"
 }
 
+/** `UUID.otaWrite` / `otaRead`: the firmware update's pair. */
+object OtaUuid {
+    const val WRITE = "02F00000-0000-0000-0000-00000000FF01"
+    const val NOTIFY = "02F00000-0000-0000-0000-00000000FF02"
+}
+
 /**
  * `Codec.encode`: frames of at most `mtu` bytes; sealed chunks of `(mtu-11)/16*16 - 5` plain bytes, plain chunks of
- * `mtu - 20`. Header: F5, length, c1, count, index, c2 (big endian).
+ * `mtu - 20`, or [plainSize] (the firmware's 224, proven on hardware). Header: F5, length, c1, count, index, c2 (big endian).
  */
-fun stockFrames(cmd: Long, payload: ByteArray, key: ByteArray?, mtu: Int = 180): List<ByteArray> {
+fun stockFrames(cmd: Long, payload: ByteArray, key: ByteArray?, mtu: Int = 180, plainSize: Int? = null): List<ByteArray> {
     val isPlain = cmd in StockCmd.PLAIN
-    val size = if (isPlain) mtu - 20 else (mtu - 11) / 16 * 16 - 5
+    val size = if (isPlain) plainSize ?: (mtu - 20) else (mtu - 11) / 16 * 16 - 5
     val chunks = if (payload.isEmpty()) listOf(ByteArray(0)) else (payload.indices step size).map { off ->
         val ch = payload.copyOfRange(off, minOf(off + size, payload.size))
         if (isPlain) ch + buf { le32(crc32(ch)) } else seal(requireNotNull(key), ch)
@@ -155,13 +169,15 @@ sealed class UploadError(message: String) : Exception(message) {
 }
 
 /** One stock session over the GATT link: auth on fff2 (replies on fff1), the upload on ffe1 (replies on ffe2). */
-class StockSession(private val link: Link, private val mtu: Int = 180) {
-    @Volatile private var key: ByteArray? = null
+class StockSession(internal val link: Link, internal val mtu: Int = 180, key: ByteArray? = null) {
+    @Volatile internal var key: ByteArray? = key
     private val parser = StockParser()
-    private val inbox = Queue<Pair<Long, ByteArray>>(Queue.UNLIMITED)
+    internal val inbox = Queue<Pair<Long, ByteArray>>(Queue.UNLIMITED)
 
     /** Latest `a055`: the dials the watch reported (side-loaded ones are missing from it). */
     @Volatile var reported: List<Long>? = null
+    /** Every entry of the latest `a055`, the photo face (FFFFFFFF) included: what a set sends back. */
+    @Volatile var listed: List<Long>? = null
     /** Latest `a055` header: how many dials, side-loaded included, and how many fit ([parseDialCount]). */
     @Volatile var dialCount: DialCount? = null
     /** Latest `a055` header, raw, for field reports. */
@@ -171,7 +187,7 @@ class StockSession(private val link: Link, private val mtu: Int = 180) {
     init {
         link.onNotify { uuid, value ->
             // K frames on fff1 don't open with F5: the parser drops them
-            if (uuid.uppercase() in setOf(DataUuid.NOTIFY, Uuid.CMD_NOTIFY)) feed(value)
+            if (uuid.uppercase() in setOf(DataUuid.NOTIFY, OtaUuid.NOTIFY, Uuid.CMD_NOTIFY)) feed(value)
         }
     }
 
@@ -188,7 +204,9 @@ class StockSession(private val link: Link, private val mtu: Int = 180) {
         } catch (_: StockFailure) {
             return
         } ?: return
-        if (got.first == StockCmd.WF_INSTALLED) {
+        // a set's ack is a055 with the single byte 00
+        if (got.first == StockCmd.WF_INSTALLED && got.second.size >= 4) {
+            listed = (4 until got.second.size - 3 step 4).map { got.second.le32(it) }
             reported = parseInstalledDials(got.second)
             dialHeader = got.second.copyOf(minOf(4, got.second.size))
             dialCount = parseDialCount(got.second)
@@ -196,7 +214,7 @@ class StockSession(private val link: Link, private val mtu: Int = 180) {
         inbox.trySend(got)
     }
 
-    private suspend fun send(cmd: Long, payload: ByteArray) {
+    internal suspend fun send(cmd: Long, payload: ByteArray) {
         val uuid = if (cmd in StockCmd.DATA) DataUuid.WRITE else Uuid.CMD_WRITE
         for (f in stockFrames(cmd, payload, key, mtu)) link.write(uuid, f)
     }
@@ -205,7 +223,7 @@ class StockSession(private val link: Link, private val mtu: Int = 180) {
      * The next command out of `wanted`. `AUTH_FAILED` ends the wait only during auth: on the shared link it also
      * answers Nothing X's frames under the key we replaced, which must not cut an upload short.
      */
-    private suspend fun next(wanted: Set<Long>, timeoutMs: Long = 8000, auth: Boolean = false): Pair<Long, ByteArray> {
+    internal suspend fun next(wanted: Set<Long>, timeoutMs: Long = 8000, auth: Boolean = false): Pair<Long, ByteArray> {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (true) {
             val left = deadline - System.currentTimeMillis()
@@ -258,6 +276,33 @@ class StockSession(private val link: Link, private val mtu: Int = 180) {
         inbox.drain()
         name(8000)
         openSession(k1)
+    }
+
+    /**
+     * The dials on the watch. a055 comes with the housekeeping after the time and fwGet the site sends right after
+     * auth (ble.ts fetchInfo), not on auth alone; waits up to [timeoutMs] for it.
+     */
+    suspend fun installedDials(timeoutMs: Long = 4000): List<Long>? {
+        if (reported == null) {
+            val now = System.currentTimeMillis() / 1000
+            val tz = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()).toLong() // ms, as tz * 1000
+            runCatching { send(StockCmd.TIME, buf { be32(now); be32(tz and 0xFFFF_FFFFL) }) }
+            runCatching { send(StockCmd.FW_GET, ByteArray(0)) }
+            runCatching { next(setOf(StockCmd.WF_INSTALLED), timeoutMs) }
+        }
+        return reported
+    }
+
+    /**
+     * Sets the dial list: the watch keeps the given ids it has, in this order, drops the rest, and shows `ids[active]`.
+     * It can't add a face. Reads the list again (the ack says nothing about what matched).
+     */
+    suspend fun setDials(ids: List<Long>, active: Int) {
+        send(StockCmd.WF_LIST, buf { u8(1); u8(active); u8(ids.size); u8(0); ids.forEach { le32(it) } })
+        next(setOf(StockCmd.WF_INSTALLED), 4000)
+        reported = null
+        send(StockCmd.WF_LIST, bytes(0))
+        next(setOf(StockCmd.WF_INSTALLED), 4000)
     }
 
     private suspend fun openSession(k1: ByteArray) {

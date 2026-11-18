@@ -1,3 +1,4 @@
+import MarkdownUI
 import SwiftUI
 import WireKit
 
@@ -7,16 +8,23 @@ struct CatalogView: View {
     @Environment(Account.self) private var account
     @Environment(Catalog.self) private var catalog
     @Binding var path: [String]
-    @State private var mine = CommandLine.arguments.contains("-mine")
+    @State private var shelf: Shelf = CommandLine.arguments.contains("-mine") ? .mine : .all
     @State private var query = ""
+    @AppStorage("catalog-sort") private var sort: Sort = .new
+
+    enum Shelf: Hashable { case all, liked, mine }
+    /// fmc_frontend market.svelte SORT_OPTIONS (Top creators, a shelf of rails, left out)
+    enum Sort: String, CaseIterable { case new, popular, downloads }
+    private var mine: Bool { shelf == .mine }
 
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
                 if account.user != nil {
-                    Picker("Show", selection: $mine) {
-                        Text("Catalog").tag(false)
-                        Text("My watch faces").tag(true)
+                    Picker("Show", selection: $shelf) {
+                        Text("All").tag(Shelf.all)
+                        Text("Liked").tag(Shelf.liked)
+                        Text("Mine").tag(Shelf.mine)
                     }
                     .pickerStyle(.segmented)
                     .padding(.horizontal)
@@ -24,11 +32,27 @@ struct CatalogView: View {
                 grid
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle(mine ? "My watch faces" : "Watch faces")
+            .navigationTitle(mine ? "My watch faces" : shelf == .liked ? "Liked" : "Watch faces")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Picker("Sort", selection: $sort) {
+                            Text("Newest").tag(Sort.new)
+                            Text("Popular").tag(Sort.popular)
+                            Text("Most downloaded").tag(Sort.downloads)
+                        }
+                    } label: {
+                        Label("Sort", systemImage: "arrow.up.arrow.down")
+                    }
+                }
+            }
             .searchable(text: $query, prompt: "Name or author")
             .refreshable { await reload() }
             .task(id: account.user?.id) { await reload() }
-            .navigationDestination(for: String.self) { FaceDetail(id: $0) }
+            // ponytail: one String path for both pages, "user:<id>" for an author; a typed route if more come
+            .navigationDestination(for: String.self) { v in
+                if v.hasPrefix("user:") { AuthorView(id: String(v.dropFirst(5))) } else { FaceDetail(id: v) }
+            }
         }
     }
 
@@ -42,7 +66,7 @@ struct CatalogView: View {
             }
             .padding(.top, 80)
         } else {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 16)], spacing: 20) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
                 ForEach(faces) { face in
                     NavigationLink(value: face.id) { FaceCell(face: face) }
                         .buttonStyle(.plain)
@@ -53,40 +77,147 @@ struct CatalogView: View {
     }
 
     private var shown: [Watchface] {
-        let list = mine ? catalog.mine : catalog.all
+        var list = mine ? catalog.mine : catalog.all
+        if shelf == .liked { list = list.filter { catalog.liked($0, by: account.user) } }
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return list }
-        return list.filter { $0.name.localizedStandardContains(q) || ($0.author ?? "").localizedStandardContains(q) }
+        if !q.isEmpty {
+            list = list.filter { $0.name.localizedStandardContains(q) || ($0.author ?? "").localizedStandardContains(q) }
+        }
+        switch sort {
+        case .new: return list.sorted { $0.created > $1.created }
+        case .popular:
+            let counts = Dictionary(catalog.likes.map { ($0.watchface, 1) }, uniquingKeysWith: +)
+            return list.sorted { counts[$0.id, default: 0] > counts[$1.id, default: 0] }
+        case .downloads: return list.sorted { $0.downloads > $1.downloads }
+        }
     }
 
     private var empty: LocalizedStringKey {
         if catalog.error != nil { "Couldn't load watch faces" }
         else if !query.isEmpty { "Nothing found" }
         else if mine { "No watch faces yet" }
+        else if shelf == .liked { "No liked watch faces" }
         else { "Loading…" }
     }
 
     private func reload() async {
         if account.user != nil { await catalog.loadMine(account) }
+        async let likes: Void = catalog.loadLikes()
         await catalog.load()
+        await likes
     }
 }
 
-/// A round preview with the name and author under it.
+/// As fmc.tools' watchface-card: the dial, its name, the author, then downloads, likes and the type.
 struct FaceCell: View {
+    @Environment(Catalog.self) private var catalog
+    @Environment(Account.self) private var account
     let face: Watchface
 
     var body: some View {
-        VStack(spacing: 8) {
-            FacePreview(url: face.previewURL)
-            VStack(spacing: 2) {
-                Text(face.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                Text(face.published ? face.author ?? " " : String(localized: "Draft"))
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        VStack(alignment: .leading, spacing: 8) {
+            FacePreview(url: face.previewURL).padding(.bottom, 2)
+            Text(face.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+            if !face.published {
+                Text("Draft").font(.caption).foregroundStyle(.secondary)
+            } else if let author = face.author {
+                HStack(spacing: 6) {
+                    Avatar(url: face.authorAvatar, name: author, side: 18)
+                    Text(author).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            HStack(spacing: 12) {
+                Label(compact(face.downloads), systemImage: "arrow.down.circle")
+                LikeButton(face: face)
+                Spacer(minLength: 0)
+                if let type = face.type, !type.isEmpty {
+                    Text(type).font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(.tertiarySystemFill), in: .capsule)
+                }
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 18, style: .continuous))
+    }
+}
+
+/// A creator's page, as fmc.tools /user/<id>: avatar, name, totals, then their published faces.
+struct AuthorView: View {
+    @Environment(Catalog.self) private var catalog
+    let id: String
+
+    var body: some View {
+        let faces = catalog.all.filter { $0.ownerId == id }.sorted { $0.created > $1.created }
+        let owner = faces.first?.expand?.owner
+        ScrollView {
+            VStack(spacing: 8) {
+                Avatar(url: owner?.avatarURL, name: owner?.name ?? "?", side: 80)
+                Text(owner?.name ?? "").font(.title2.bold())
+                Text("\(faces.count) watch faces · \(compact(faces.map(\.downloads).reduce(0, +))) downloads · \(compact(faces.map(catalog.likeCount).reduce(0, +))) likes")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            .padding(.top, 8)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+                ForEach(faces) { face in
+                    NavigationLink(value: face.id) { FaceCell(face: face) }.buttonStyle(.plain)
+                }
+            }
+            .padding()
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle(owner?.name ?? "")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Link(destination: Account.base.appending(path: "user/\(id)")) { Label("Open on fmc.tools", systemImage: "safari") }
             }
         }
-        .accessibilityElement(children: .combine)
+        .task { if catalog.all.isEmpty { await catalog.load() } }
     }
+}
+
+/// The heart and the count; a tap likes or unlikes when signed in.
+struct LikeButton: View {
+    @Environment(Catalog.self) private var catalog
+    @Environment(Account.self) private var account
+    let face: Watchface
+
+    var body: some View {
+        let liked = catalog.liked(face, by: account.user)
+        Button {
+            Task { await catalog.toggleLike(face, account: account) }
+        } label: {
+            Label(compact(catalog.likeCount(face)), systemImage: liked ? "heart.fill" : "heart")
+                .foregroundStyle(liked ? Color.red : Color.secondary)
+        }
+        .buttonStyle(.plain)
+        .disabled(account.user == nil)
+    }
+}
+
+/// A round avatar, else the name's first letter.
+struct Avatar: View {
+    let url: URL?
+    let name: String
+    var side: CGFloat = 24
+
+    var body: some View {
+        AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: {
+            Text(name.prefix(1).uppercased()).font(.system(size: side * 0.5, weight: .semibold))
+                .foregroundStyle(Color.fmcOnAccent)
+        }
+        .frame(width: side, height: side)
+        .background(Color.fmcAccent)
+        .clipShape(.circle)
+    }
+}
+
+/// 1234 → "1.2K", as fmc.tools' compact().
+func compact(_ n: Int) -> String {
+    n.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
 }
 
 /// The watch's 466×466 round panel.
@@ -126,6 +257,8 @@ struct FaceDetail: View {
     /// The watch is full: the install waits here for the dial to replace.
     @State private var slots: [DialSlot] = []
     @State private var picking: CheckedContinuation<UInt32?, Never>?
+    /// Picked on the Install tap, before connecting.
+    @State private var preset: UInt32?
 
     var body: some View {
         List {
@@ -135,7 +268,15 @@ struct FaceDetail: View {
                         FacePreview(url: face.previewURL).frame(maxWidth: 240)
                         VStack(spacing: 4) {
                             Text(face.name).font(.title2.bold()).multilineTextAlignment(.center)
-                            if let author = face.author { Text(author).foregroundStyle(.secondary) }
+                        }
+                        if let other = face.otherDevice {
+                            Label("Made for the \(other). It may not work on the Watch Pro 2.",
+                                  systemImage: "exclamationmark.triangle.fill")
+                                .font(.subheadline)
+                                .foregroundStyle(.orange)
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(.orange.opacity(0.12), in: .rect(cornerRadius: 12))
                         }
                         install(face)
                     }
@@ -146,11 +287,21 @@ struct FaceDetail: View {
                     Text(footer).frame(maxWidth: .infinity)
                 }
                 Section {
+                    if let author = face.author, let owner = face.ownerId {
+                        NavigationLink(value: "user:\(owner)") {
+                            LabeledContent("Author") {
+                                HStack(spacing: 8) {
+                                    Avatar(url: face.authorAvatar, name: author, side: 24)
+                                    Text(author)
+                                }
+                            }
+                        }
+                    }
                     LabeledContent("Downloads", value: "\(face.downloads)")
-                    Link(destination: face.pageURL) { Label("Open on fmc.tools", systemImage: "safari") }
+                    LabeledContent("Likes") { LikeButton(face: face) }
                 }
                 if !face.description.isEmpty {
-                    Section("About") { Text(face.description) }
+                    Section("About") { Markdown(face.description).textSelection(.enabled) }
                 }
             } else if let error {
                 ContentUnavailableView("Couldn't load the watch face", systemImage: "exclamationmark.triangle",
@@ -160,6 +311,13 @@ struct FaceDetail: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let face {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Link(destination: face.pageURL) { Label("Open on fmc.tools", systemImage: "safari") }
+                }
+            }
+        }
         .alert("Close Nothing X first", isPresented: $closeNothingX) {
             Button("Install") { Task { await fetchAndInstall() } }
             Button("Cancel", role: .cancel) {}
@@ -176,14 +334,31 @@ struct FaceDetail: View {
                 Text("This face has a \(big.w)×\(big.h) px image, larger than factory faces use. Large images can make the watch restart in a loop.")
             }
         }
-        .confirmationDialog("The watch is full", isPresented: Binding { picking != nil } set: {
-            // after a button's own answer, so a tap outside is the only thing that lands here
-            if !$0 { DispatchQueue.main.async { answer(nil) } }
-        }, titleVisibility: .visible) {
-            ForEach(slots) { s in Button("Replace \(s.label)", role: .destructive) { answer(s.id) } }
-            Button("Cancel", role: .cancel) { answer(nil) }
-        } message: {
-            Text("Pick the face to replace. Faces are numbered in the order the watch shows them.")
+        // the faces as on the Watch tab: tap the one to replace. A swipe down cancels.
+        .sheet(isPresented: Binding { picking != nil } set: { if !$0 { answer(nil) } }) {
+            NavigationStack {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Pick the face to replace. Faces are in the order the watch shows them.")
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 20)
+                    ScrollView(.horizontal) {
+                        LazyHStack(alignment: .top, spacing: 12) {
+                            ForEach(slots) { s in
+                                Button { answer(s.id) } label: { DialTile(slot: s) }.buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .scrollIndicators(.visible)
+                    .contentMargins(.horizontal, 20, for: .scrollContent)
+                    .contentMargins(.bottom, 10, for: .scrollContent)
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, 8)
+                .navigationTitle("The watch is full")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { answer(nil) } } }
+            }
+            .presentationDetents([.height(280)])
         }
         .alert("Couldn't install", isPresented: Binding { failure != nil } set: { if !$0 { failure = nil } }) {
             Button("OK") {}
@@ -192,6 +367,7 @@ struct FaceDetail: View {
         }
         .task(id: id) {
             do { face = try await catalog.face(id, account: account) } catch { self.error = error.localizedDescription }
+            if catalog.likes.isEmpty { await catalog.loadLikes() }
         }
     }
 
@@ -201,7 +377,7 @@ struct FaceDetail: View {
                 .padding(.horizontal, 20)
         } else {
             Button {
-                closeNothingX = true
+                Task { await start(face) }
             } label: {
                 Label(installed ? "Installed" : "Install",
                       systemImage: installed ? "checkmark" : "arrow.down.circle")
@@ -213,6 +389,23 @@ struct FaceDetail: View {
 
     private var footer: LocalizedStringKey {
         "Close Nothing X before installing: the watch talks to one app at a time."
+    }
+
+    /// Full when last read: the dial to replace first, then the Nothing X warning.
+    private func start(_ face: Watchface) async {
+        preset = nil
+        if let known = FaceInstall.knownFull(seed: face.id) {
+            guard let picked = await pick(known) else { return }
+            preset = picked
+        }
+        closeNothingX = true
+    }
+
+    private func pick(_ slots: [DialSlot]) async -> UInt32? {
+        await withCheckedContinuation { c in
+            self.slots = slots
+            picking = c
+        }
     }
 
     private func fetchAndInstall() async {
@@ -237,12 +430,7 @@ struct FaceDetail: View {
         progress = 0
         defer { progress = nil }
         do {
-            try await FaceInstall.install(bin, seed: face.id, name: face.name, pick: { slots in
-                await withCheckedContinuation { c in
-                    self.slots = slots
-                    picking = c
-                }
-            }) { p in
+            try await FaceInstall.install(bin, seed: face.id, name: face.name, slot: preset, pick: { await pick($0) }) { p in
                 Task { @MainActor in progress = Double(p) / 100 }
             }
             UserDefaults.standard.set(face.previewURL, forKey: "dial-preview-\(dialId(face.id))")

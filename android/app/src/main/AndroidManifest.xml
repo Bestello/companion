@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Updates from GitHub releases (AppUpdate); the system still asks before each install. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- The watch: the link Nothing X holds, then the K channel and, for watch faces, the stock session. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- Only to find the watch by its name when no link is up; never for location. -->

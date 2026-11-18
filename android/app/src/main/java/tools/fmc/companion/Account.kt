@@ -15,7 +15,9 @@ import org.json.JSONObject
 // Email and password, plus the OAuth2 providers the server has on (Google). Sign-up stays on the site, but OAuth2
 // creates an account on first use, so the app offers account deletion (Google Play's account deletion rule).
 
-data class User(val id: String, val email: String, val name: String)
+data class User(val id: String, val email: String, val name: String, val avatar: String = "") {
+    val avatarUrl get() = avatar.takeIf { it.isNotEmpty() }?.let { "$FMC/api/files/users/$id/$it?thumb=100x100" }
+}
 
 data class OAuthProvider(val name: String, val displayName: String, val authURL: String, val codeVerifier: String) {
     /** The provider's page with PocketBase's redirect and our realtime client as `state`, as the JS SDK does. */
@@ -122,7 +124,7 @@ class Account(private val store: SecureStore) {
         val r = JSONObject(http("POST", api(path), body ?: JSONObject(), token))
         val rec = r.getJSONObject("record")
         token = r.getString("token")
-        user = User(rec.getString("id"), rec.optString("email"), rec.optString("name"))
+        user = User(rec.getString("id"), rec.optString("email"), rec.optString("name"), rec.optString("avatar"))
     }
 
     companion object {

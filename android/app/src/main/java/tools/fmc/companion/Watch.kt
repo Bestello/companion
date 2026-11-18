@@ -105,7 +105,12 @@ class FacesOnWatch(
     /** "6 of 7" from the a055 header, side-loaded dials included */
     val count: String?,
     val header: String,
-)
+    /** Every entry of the last a055, the photo face included. */
+    val all: List<Long>,
+) {
+    /** The face on screen: a055 byte 1 indexes the full list (cmf-watch-sdk docs/recon.md, "Stock watch faces"). */
+    val active get() = header.split(" ").getOrNull(1)?.toIntOrNull(16)?.let { all.getOrNull(it) }
+}
 
 fun facesOnWatch(context: Context): FacesOnWatch {
     val prefs = context.getSharedPreferences("dials", Context.MODE_PRIVATE)
@@ -115,22 +120,26 @@ fun facesOnWatch(context: Context): FacesOnWatch {
         prefs.getLong("faces-on-watch-date", 0),
         prefs.getString("faces-on-watch-count", null)?.split(",")?.let { (n, c) -> "$n of $c" },
         prefs.getString("faces-on-watch-header", "")!!,
+        prefs.getString("faces-on-watch-all", "")!!.split(",").mapNotNull { it.toLongOrNull() },
     )
 }
 
 /** ble.ts WF_CAPACITY */
+// ponytail: the watch takes 6; a055's 4th byte says 7 (a built-in face?), so it is ignored
 const val CAPACITY = 6
 
 /**
  * Connects and opens a stock session (a new bind only when the saved key is refused, and [bind] allows one: it
- * pops up on the watch), then [body].
+ * pops up on the watch), then [body]. [before] sees the link before anything is sent: it can still refuse.
  */
-private suspend fun <T> withStockSession(
-    context: Context, store: SecureStore, bind: Boolean = true, body: suspend (StockSession, String) -> T,
+internal suspend fun <T> withStockSession(
+    context: Context, store: SecureStore, bind: Boolean = true, before: (BleLink) -> Unit = {},
+    body: suspend (StockSession, String) -> T,
 ): T {
     val link = BleLink(context)
     try {
         withTimeout(30_000) { link.connect(scan = true) }
+        before(link)
         val watch = link.watchId
         var secret = store["k-$watch"]
         if (secret == null) {
@@ -147,8 +156,6 @@ private suspend fun <T> withStockSession(
             val k1 = session.pair(hexOrNull(secret) ?: ByteArray(0))
             store["stock-$watch"] = k1.hex()
         }
-        // a055 comes on its own after auth
-        delay(1500)
         return body(session, "$watch") // the keys were "dials-$watch" before: null stays "null"
     } finally {
         link.disconnect()
@@ -158,10 +165,10 @@ private suspend fun <T> withStockSession(
 private class Dials(val mine: List<Long>, val installed: List<Long>, val counted: DialCount?, val header: String)
 
 /** What the watch reported in a055, plus the dials this app put there that the list leaves out. */
-private fun dials(context: Context, session: StockSession, watch: String): Dials {
+private suspend fun dials(context: Context, session: StockSession, watch: String): Dials {
     val prefs = context.getSharedPreferences("dials", Context.MODE_PRIVATE)
     val mine = prefs.getString("dials-$watch", "")!!.split(",").mapNotNull { it.toLongOrNull() }
-    val reported = session.reported ?: emptyList()
+    val reported = session.installedDials() ?: emptyList()
     val installed = reported + mine.filter { it !in reported }
     // the header counts side-loaded dials too; the hardcoded capacity and the id list are the fallback
     val header = (session.dialHeader ?: ByteArray(0)).joinToString(" ") { "%02x".format(it) }
@@ -170,8 +177,9 @@ private fun dials(context: Context, session: StockSession, watch: String): Dials
 }
 
 /** What the Watch tab shows. */
-private fun remember(context: Context, onWatch: List<Long>, count: Int?, capacity: Int, header: String) {
+private fun remember(context: Context, onWatch: List<Long>, count: Int?, capacity: Int, header: String, all: List<Long>? = null) {
     context.getSharedPreferences("dials", Context.MODE_PRIVATE).edit()
+        .apply { all?.let { putString("faces-on-watch-all", it.joinToString(",")) } }
         .putString("faces-on-watch", onWatch.joinToString(",")).putLong("faces-on-watch-date", System.currentTimeMillis())
         .putString("faces-on-watch-count", count?.let { "$it,$capacity" })
         .putString("faces-on-watch-header", header)
@@ -179,29 +187,76 @@ private fun remember(context: Context, onWatch: List<Long>, count: Int?, capacit
 }
 
 /**
- * Reads the dials off the watch for the Watch tab, with the saved key only: no bind popup on a watch this app never
- * installed on. Takes the watch from Nothing X, like an install.
+ * Reads the dials off the watch for the Watch tab. [bind]: when the saved key is missing or refused, bind (a popup on
+ * the watch, and Nothing X loses the watch, like an install); else that throws AuthFailed or Timeout.
  */
-suspend fun readFacesOnWatch(context: Context, store: SecureStore) = withStockSession(context, store, bind = false) { session, watch ->
+suspend fun readFacesOnWatch(context: Context, store: SecureStore, bind: Boolean) = withStockSession(context, store, bind) { session, watch ->
     val d = dials(context, session, watch)
-    remember(context, d.installed, d.counted?.count, d.counted?.capacity ?: CAPACITY, d.header)
+    remember(context, d.installed, d.counted?.count, CAPACITY, d.header, session.listed)
 }
 
-/** [pick]: the watch is full, which dial goes; null cancels the install. */
+/** Shows [id] on the watch. */
+suspend fun activateFace(context: Context, store: SecureStore, id: Long) =
+    editFaces(context, store) { all, _ -> all.indexOf(id).takeIf { it >= 0 }?.let { all to it } }
+
+/**
+ * Takes [id] off the watch; the face on screen stays, or the first one if it was that. A downloaded face's file goes at
+ * the watch's next boot or upload; built-in faces stay on it, unlisted.
+ */
+suspend fun deleteFace(context: Context, store: SecureStore, id: Long) = editFaces(context, store) { all, active ->
+    val kept = all.filter { it != id }
+    if (kept.size == all.size) null else kept to (active?.let { all.getOrNull(it) }?.let(kept::indexOf)?.takeIf { it >= 0 } ?: 0)
+}
+
+/** Reads the full list, sends `change(list, active index)` (null: nothing to do), saves what the watch reports. */
+private suspend fun editFaces(context: Context, store: SecureStore, change: (List<Long>, Int?) -> Pair<List<Long>, Int>?) =
+    withStockSession(context, store) { session, watch ->
+        session.installedDials()
+        val active = session.dialHeader?.getOrNull(1)?.toInt()?.and(0xFF)
+        change(session.listed ?: emptyList(), active)?.let { (ids, i) ->
+            session.setDials(ids, i)
+            // a face taken off is no longer this app's either
+            val prefs = context.getSharedPreferences("dials", Context.MODE_PRIVATE)
+            val listed = session.listed ?: emptyList()
+            val mine = prefs.getString("dials-$watch", "")!!.split(",").mapNotNull { it.toLongOrNull() }
+            prefs.edit().putString("dials-$watch", mine.filter { it in listed }.joinToString(",")).apply()
+        }
+        val d = dials(context, session, watch)
+        remember(context, d.installed, d.counted?.count, CAPACITY, d.header, session.listed)
+    }
+
+/**
+ * The dials to pick from before connecting: the watch was full when last read and this face isn't on it. null: room,
+ * or never read; the install finds out on the watch.
+ */
+fun knownFull(context: Context, seed: String): List<DialSlot>? {
+    val on = facesOnWatch(context)
+    val ids = on.faces.map { it.id }
+    val count = context.getSharedPreferences("dials", Context.MODE_PRIVATE).getString("faces-on-watch-count", null)
+        ?.split(",")?.mapNotNull { it.toIntOrNull() }
+    val full = (count?.firstOrNull() ?: ids.size) >= CAPACITY
+    return if (full && ids.isNotEmpty() && dialId(seed) !in ids) on.faces else null
+}
+
+/**
+ * [preset]: the dial to replace, picked before connecting ([knownFull]); [pick]: the watch is full and nothing was
+ * picked yet, which dial goes; null cancels the install.
+ */
 suspend fun installFaceOnWatch(
     context: Context, store: SecureStore, bin: ByteArray, seed: String, name: String,
-    pick: suspend (List<DialSlot>) -> Long?, progress: (Int) -> Unit,
+    pick: suspend (List<DialSlot>) -> Long?, preset: Long? = null, progress: (Int) -> Unit,
 ) = withStockSession(context, store) { session, watch ->
     val prefs = context.getSharedPreferences("dials", Context.MODE_PRIVATE)
     val d = dials(context, session, watch)
     val installed = d.installed
-    val cap = d.counted?.capacity ?: CAPACITY
-    val full = d.counted?.let { it.count >= it.capacity } ?: (installed.size >= CAPACITY)
+    val cap = CAPACITY
+    val full = (d.counted?.count ?: installed.size) >= CAPACITY
     // which dial to replace (ble.ts NoFreeSlotError, slot-dialog.svelte)
     suspend fun ask() = pick(installed.mapIndexed { i, id -> slot(context, prefs, id, i) })
         ?: throw CancellationException("no dial picked")
     // full and not a re-install of this face: ask before sending anything
-    var slot: Long? = if (full && dialId(seed) !in installed) ask() else null
+    // a pick made from a stale list stands only while that dial is still there
+    var slot: Long? = preset?.takeIf { it in installed } ?: if (full && dialId(seed) !in installed) ask() else null
     val id = try {
         try {
             installFace(session, bin, seed, installed, cap, slot, progress = progress)

@@ -22,9 +22,10 @@ enum BLEError: LocalizedError {
 final class BLELink: NSObject, Link, @unchecked Sendable {
     static let service = CBUUID(string: "FFF0")
     private static let required = [Uuid.cmdWrite, Uuid.cmdNotify, Uuid.shellWrite, Uuid.shellNotify]
-    /// The stock upload pair: only the watchface install needs it.
-    private static let known = (required + [DataUuid.write, DataUuid.notify]).map { (CBUUID(string: $0), $0) }
-    private static let notifies = [Uuid.cmdNotify, Uuid.shellNotify, DataUuid.notify]
+    /// The stock upload pair (watchface install) and the firmware update's: only those need them.
+    private static let known = (required + [DataUuid.write, DataUuid.notify, OtaUuid.write, OtaUuid.notify])
+        .map { (CBUUID(string: $0), $0) }
+    private static let notifies = [Uuid.cmdNotify, Uuid.shellNotify, DataUuid.notify, OtaUuid.notify]
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -39,6 +40,8 @@ final class BLELink: NSObject, Link, @unchecked Sendable {
 
     /// The connected watch's identifier: keys the cached pairing secret.
     var watchID: UUID? { peripheral?.identifier }
+    /// The advertised name ("CMF Watch Pro 2-1A2B"): the only model id there is.
+    var watchName: String? { peripheral?.name }
 
     override init() {
         super.init()

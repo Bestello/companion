@@ -1,7 +1,10 @@
 # Watch apps on the phone
 
 The Apps tab on iOS and Android lists the apps on the watch, plus the ones that asked for something but are gone from
-the watch now. Each app's page has a switch for every service it asked for. The services themselves and their byte
+the watch now. Each app's page has a switch for every service it asked for. An app whose store package has a higher
+header version than the one on the watch goes under "Updates", with a link to its page on fmc.tools. The companion
+reads the first 64 bytes of each store package for that: the listing's `version` text doesn't match the header for SDK
+examples like Workout. The services themselves and their byte
 layouts are in [miniapp-rpc.md](miniapp-rpc.md). This file covers how the phone side works and why it looks the way it
 does.
 

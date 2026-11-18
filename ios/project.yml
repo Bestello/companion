@@ -7,6 +7,10 @@ options:
 packages:
   WireKit:
     path: WireKit
+  # face descriptions on fmc.tools are markdown: headings, lists, quotes, code
+  MarkdownUI:
+    url: https://github.com/gonzalezreal/swift-markdown-ui
+    exactVersion: 2.4.1
 targets:
   FMCCompanion:
     type: application
@@ -14,6 +18,7 @@ targets:
     sources: [App]
     dependencies:
       - package: WireKit
+      - package: MarkdownUI
     # WeatherKit for the miniapp weather service: the capability is also enabled for the App ID in Apple Developer
     entitlements:
       path: App/FMCCompanion.entitlements
