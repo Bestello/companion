@@ -72,6 +72,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Build
@@ -140,12 +141,16 @@ class Nav {
         set(v) { if (v == null) pages.removeLastOrNull() else pages.add(v) }
     var signingIn by mutableStateOf(false)
     /** A watch app's page, over Apps or straight from its ask notification. */
-    var app by mutableStateOf<String?>(null)
+    /** App pages, newest last: "store:<name>" is the store page, a bare name the app's settings. */
+    private val apps = androidx.compose.runtime.mutableStateListOf<String>()
+    var app: String?
+        get() = apps.lastOrNull()
+        set(v) { if (v == null) apps.removeLastOrNull() else apps.add(v) }
     var developer by mutableStateOf(false)
     var firmware by mutableStateOf(false)
 
     /** Back to the tab's root. */
-    fun root() { pages.clear(); signingIn = false; app = null; developer = false; firmware = false }
+    fun root() { pages.clear(); signingIn = false; apps.clear(); developer = false; firmware = false }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -180,7 +185,7 @@ fun App(model: AppModel, nav: Nav) {
         Column(Modifier.padding(pad)) {
             when {
                 nav.signingIn -> SignInScreen(model) { nav.signingIn = false }
-                nav.app != null -> AppScreen(model, nav.app!!) { nav.app = null }
+                nav.app != null -> AppScreen(model, nav.app!!, { nav.app = it }) { nav.app = null }
                 nav.developer -> DeveloperScreen { nav.developer = false }
                 nav.firmware -> FirmwareScreen(model) { nav.firmware = false }
                 nav.face?.startsWith("user:") == true -> AuthorScreen(model, nav.face!!.removePrefix("user:"), { nav.face = it }) { nav.face = null }
@@ -245,13 +250,13 @@ fun CatalogScreen(model: AppModel, open: (String) -> Unit) {
         else -> list.sortedByDescending { it.created }
     }
     Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) { Bar(if (showMine) "My watch faces" else if (signedIn && shelf == 1) "Liked" else "Watch faces") }
+        Bar(if (showMine) "My watch faces" else if (signedIn && shelf == 1) "Liked" else "Watch faces") {
             Box {
-                TextButton({ sorting = true }) { Text(listOf("Newest", "Popular", "Most downloaded")[sort]) }
+                IconButton({ sorting = true }) { Icon(painterResource(R.drawable.ic_sort), "Sort") }
                 DropdownMenu(sorting, { sorting = false }) {
                     listOf("Newest", "Popular", "Most downloaded").forEachIndexed { i, label ->
-                        DropdownMenuItem({ Text(label, fontWeight = if (i == sort) FontWeight.SemiBold else null) }, { sort = i; sorting = false })
+                        DropdownMenuItem({ Text(label) }, { sort = i; sorting = false },
+                            trailingIcon = { if (i == sort) Icon(Icons.Default.Check, "Selected") })
                     }
                 }
             }
