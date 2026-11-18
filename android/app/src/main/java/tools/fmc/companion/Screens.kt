@@ -68,6 +68,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -157,9 +158,10 @@ fun App(model: AppModel, nav: Nav) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun Bar(title: String, back: (() -> Unit)? = null, actions: @Composable RowScope.() -> Unit = {}) = TopAppBar(
-    title = { Text(title, fontWeight = FontWeight.Bold) },
+    title = { Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold) },
     navigationIcon = { back?.let { IconButton(it) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } } },
     actions = actions,
+    windowInsets = WindowInsets(0),
     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
 )
 
@@ -195,7 +197,7 @@ fun CatalogScreen(model: AppModel, open: (String) -> Unit) {
     Column {
         Bar(if (showMine) "My watch faces" else "Watch faces")
         PullToRefreshBox(refreshing, { scope.launch { refreshing = true; model.reload(); refreshing = false } }) {
-            LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp),
+            LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
