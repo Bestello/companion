@@ -33,6 +33,7 @@ import WireKit
         do {
             let state = try await read()
             phase = .checked(state)
+            Analytics.track("watch_connected", ["firmware": state == nil ? "stock" : "patched"])
             lastLoader = state
             RPCListener.shared.update(state)
         } catch {

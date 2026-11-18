@@ -451,6 +451,7 @@ fun FaceScreen(model: AppModel, id: String, author: (String) -> Unit = {}, back:
             installFaceOnWatch(context, model.store, bin, f.id, f.name, pick = { slots -> ask(slots) }, preset = preset) { p -> scope.launch { progress = p / 100f } }
             context.getSharedPreferences("dials", 0).edit().putString("preview-${dialId(f.id)}", f.previewURL).apply()
             installed = true
+            Analytics.track("face_installed", mapOf("id" to f.id))
         } catch (e: CancellationException) {
             if (!isActive) throw e // a dismissed slot dialog cancels the install, not the screen
         } catch (e: Exception) {

@@ -14,6 +14,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (savedInstanceState == null) Analytics.start(this)
         if (savedInstanceState == null) handle(intent)
         if (model.services) RpcService.start(this)
         setContent { FmcTheme { App(model, nav) } }

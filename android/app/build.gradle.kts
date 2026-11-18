@@ -72,6 +72,7 @@ dependencies {
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.coroutines.android)
     implementation(libs.markdown.m3)
+    implementation(libs.aptabase)
 
     testImplementation(libs.junit)
     testImplementation(kotlin("test"))

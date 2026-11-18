@@ -1,4 +1,5 @@
 [versions]
+aptabase = "0.1.0"
 agp = "8.13.2"
 kotlin = "2.4.21"
 composeBom = "2025.12.01"
@@ -10,6 +11,7 @@ json = "20250517"
 markdown = "0.39.2"
 
 [libraries]
+aptabase = { group = "com.github.aptabase", name = "aptabase-kotlin", version.ref = "aptabase" }
 compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
 compose-ui = { group = "androidx.compose.ui", name = "ui" }
 compose-material3 = { group = "androidx.compose.material3", name = "material3" }

@@ -126,6 +126,7 @@ import WireKit
                 }
             }
             DevLog.shared.log("Firmware sent: \(check?.firmware?.version ?? "?")")
+            Analytics.track("firmware_installed")
             flashed = true
         } catch {
             self.error = String(localized: "Couldn't update the firmware: \(error.localizedDescription)")
@@ -162,6 +163,7 @@ import WireKit
         do {
             try await Self.install(pkg) { p in Task { @MainActor in self.progress = p } }
             DevLog.shared.log("App Loader installed (crc \(String(format: "%08x", check?.loaderHeader?.crc ?? 0)))")
+            Analytics.track("loader_installed")
             error = nil
             await watch.check()
         } catch InstallError.busy {

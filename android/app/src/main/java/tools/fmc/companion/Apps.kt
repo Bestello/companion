@@ -518,6 +518,7 @@ object AppUpdates {
             val pkg = download(listing.download)
             kInstall(context, model, pkg) { progress[name] = it }
             DevLog.log(context, "$name installed")
+            Analytics.track("app_installed", mapOf("app" to listing.slug))
             model.check()
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
@@ -539,6 +540,7 @@ object AppUpdates {
         try {
             kRun(context, model) { tools.fmc.companion.wire.remove(it, slot) }
             DevLog.log(context, "$name removed from slot $slot")
+            Analytics.track("app_removed", mapOf("app" to name))
             // as phones do on uninstall: a reinstall asks again
             Grants(context).reset(name)
             model.check()

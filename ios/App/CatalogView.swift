@@ -435,6 +435,7 @@ struct FaceDetail: View {
             }
             UserDefaults.standard.set(face.previewURL, forKey: "dial-preview-\(dialId(face.id))")
             installed = true
+            Analytics.track("face_installed", ["id": face.id])
         } catch is CancellationError {
         } catch {
             failure = error.localizedDescription

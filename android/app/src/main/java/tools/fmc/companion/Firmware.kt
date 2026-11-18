@@ -150,6 +150,7 @@ object FirmwareModel {
                 }
             }
             DevLog.log(context, "Firmware sent: ${check?.firmware?.version}")
+            Analytics.track("firmware_installed")
             flashed = true
         } catch (e: CancellationException) {
             throw e
@@ -169,6 +170,7 @@ object FirmwareModel {
         try {
             kInstall(context, model, pkg) { p -> progress = p }
             DevLog.log(context, "App Loader installed (crc %08x)".format(check?.loaderHeader?.crc ?: 0))
+            Analytics.track("loader_installed")
             error = null
         } catch (e: CancellationException) {
             throw e

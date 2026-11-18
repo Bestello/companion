@@ -11,6 +11,10 @@ packages:
   MarkdownUI:
     url: https://github.com/gonzalezreal/swift-markdown-ui
     exactVersion: 2.4.1
+  # anonymous usage counts, self-hosted (Analytics.swift)
+  Aptabase:
+    url: https://github.com/aptabase/aptabase-swift
+    from: 0.3.12
 targets:
   FMCCompanion:
     type: application
@@ -19,6 +23,7 @@ targets:
     dependencies:
       - package: WireKit
       - package: MarkdownUI
+      - package: Aptabase
     # WeatherKit for the miniapp weather service: the capability is also enabled for the App ID in Apple Developer
     entitlements:
       path: App/FMCCompanion.entitlements

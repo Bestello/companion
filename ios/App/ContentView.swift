@@ -13,6 +13,8 @@ struct FMCCompanionApp: App {
     /// The catalog's navigation: face ids. A link to a face replaces it.
     @State private var path: [String] = []
 
+    init() { Analytics.start() }
+
     var body: some Scene {
         WindowGroup {
             TabView(selection: $tab) {

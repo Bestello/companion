@@ -91,6 +91,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
             Phase.Failed(e.message ?: "Couldn't read the watch.")
         }
         lastLoader = loader
+        if (phase is Phase.Checked) Analytics.track("watch_connected", mapOf("firmware" to if (loader == null) "stock" else "patched"))
     }
 
     suspend fun reload() {

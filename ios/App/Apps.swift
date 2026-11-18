@@ -230,6 +230,7 @@ struct AppsTab: View {
             let (pkg, _) = try await URLSession.shared.data(from: listing.download)
             try await FirmwareModel.install(pkg) { p in Task { @MainActor in self.progress[name] = p } }
             DevLog.shared.log("\(name) installed")
+            Analytics.track("app_installed", ["app": listing.slug])
             await watch.check()
         } catch InstallError.busy {
             error = String(localized: "\(listing.name) or the Apps menu is open on the watch. Go back to the watch face, then try again.")
@@ -250,6 +251,7 @@ extension AppUpdates {
         do {
             try await FirmwareModel.remove(slot: slot)
             DevLog.shared.log("\(name) removed from slot \(slot)")
+            Analytics.track("app_removed", ["app": name])
             // as iOS does on uninstall: a reinstall asks again
             Permissions.shared.reset(name)
             await watch.check()
