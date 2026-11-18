@@ -210,7 +210,7 @@ suspend fun deleteFace(context: Context, store: SecureStore, id: Long) = editFac
 
 /** Reads the full list, sends `change(list, active index)` (null: nothing to do), saves what the watch reports. */
 private suspend fun editFaces(context: Context, store: SecureStore, change: (List<Long>, Int?) -> Pair<List<Long>, Int>?) =
-    withStockSession(context, store, bind = false) { session, watch ->
+    withStockSession(context, store) { session, watch ->
         session.installedDials()
         val active = session.dialHeader?.getOrNull(1)?.toInt()?.and(0xFF)
         change(session.listed ?: emptyList(), active)?.let { (ids, i) ->

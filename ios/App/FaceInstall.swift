@@ -155,8 +155,9 @@ enum FaceInstall {
     }
 
     /// Reads the full list, sends `change(list, active index)` (nil: nothing to do), saves what the watch reports.
+    /// A user's own action, like an install: a refused key binds again (the popup on the watch).
     @MainActor private static func edit(_ change: ([UInt32], Int?) -> ([UInt32], Int)?) async throws {
-        try await session(bind: false) { session, watch in
+        try await session { session, watch in
             _ = await session.installedDials()
             let all = await session.listed ?? []
             let active = await session.dialHeader.flatMap { $0.count >= 2 ? Int($0[$0.startIndex + 1]) : nil }
