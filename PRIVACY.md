@@ -1,0 +1,35 @@
+# FMC Companion privacy policy
+
+Last updated: November 18, 2026
+
+FMC Companion (iOS and Android) installs watch faces, firmware and apps on the CMF Watch Pro 2 and passes data
+between the phone and the apps on the watch. It has no ads, no analytics and no tracking, and it doesn't sell or
+share your data.
+
+## What stays on your phone and watch
+
+- **Bluetooth.** The app talks to your watch over Bluetooth. The watch's keys and the list of faces on it are kept
+  on the phone.
+- **Permissions you grant to watch apps.** Your answers are stored only on the phone. Deleting an app from the watch
+  with FMC Companion forgets them.
+- **Calendar.** When you allow a watch app to use your calendars, upcoming events are read on the phone and sent to
+  the watch over Bluetooth. They are not sent anywhere else.
+- **Notifications (Android).** When you allow a watch app to use notifications, their text is sent only to the watch.
+
+## What leaves the phone
+
+- **fmc.tools.** The catalog of watch faces, apps and firmware comes from fmc.tools. If you sign in, your fmc.tools
+  account (email, name, avatar) and your likes are handled by fmc.tools under its own terms.
+- **Weather and town.** When you allow a watch app to use location or weather, the phone's location is used to get
+  the weather and the town's name. On iOS this goes through Apple's WeatherKit and geocoder; on Android, through
+  Open-Meteo (location rounded to about 1 km) and the system's geocoder. The watch gets only the town and the
+  weather, with the location rounded to about 10 km.
+- **Web requests by watch apps.** A watch app can fetch an `https://` address only on a host you allowed for it.
+- **Updates (Android).** The app checks GitHub for a newer release.
+
+Bluetooth traffic to the watch is not encrypted end to end: anyone nearby with a Bluetooth scanner could read what
+goes to the watch.
+
+## Contact
+
+Questions: open an issue at https://github.com/fmctools/companion/issues.

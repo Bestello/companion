@@ -247,7 +247,7 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit) {
     var showAll by remember { mutableStateOf(false) }
     // Installed is the watch's list: nothing until it is read, not the apps that only asked for something
     val loader = model.listedLoader
-    val apps = if (showAll) WatchApp.store(loader, grants) else if (loader == null) emptyList() else WatchApp.all(loader, grants)
+    val apps = if (showAll) WatchApp.store(loader, grants) else if (loader == null) emptyList() else WatchApp.all(loader, grants).filter { it.slot != null }
     // first load: placeholder rows; a refresh keeps the rows it has
     val loading = apps.isEmpty() && if (showAll) !StoreApps.loaded else model.isChecking
     Column {
@@ -261,12 +261,12 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit) {
                     }
                 }
             }
-            val (on, off) = apps.partition { it.slot != null }
+            val on = apps.filter { it.slot != null }
             fun group(title: String, list: List<WatchApp>, footer: String? = null) = item(title) {
                 Section(title, footer) {
                     list.forEachIndexed { i, app ->
                         if (i > 0) HorizontalDivider()
-                        NavRow(app.title, app.detail, grants.pendingCount(app.name), { open(app.name) },
+                        NavRow(app.title, app.detail, grants.pendingCount(app.name), { open(if (showAll) "store:${app.name}" else app.name) },
                             trailing = if (app.update != null || (app.slot == null && StoreApps.listing(app.name)?.pkg != null)) {{ GetButton(model, app) }}
                                 else if (showAll && app.slot != null) {{ Text("Installed", color = Fmc.secondary, fontWeight = FontWeight.SemiBold,
                                     style = MaterialTheme.typography.bodySmall) }} else null) { AppIcon(app.name) }
@@ -278,10 +278,6 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit) {
             else {
                 if (updates.isNotEmpty()) group("Updates", updates, "Updates install over Bluetooth. Keep the app closed on the watch meanwhile.")
                 if (current.isNotEmpty()) group("On the watch", current)
-            }
-            if (!showAll && off.isNotEmpty()) {
-                if (model.listedLoader == null) group("Asked for permissions", off, "Connect on the Watch tab to see every app on the watch.")
-                else group("Not on the watch", off)
             }
             if (loading) item {
                 Section {
@@ -311,7 +307,10 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit) {
 }
 
 @Composable
-fun AppScreen(model: AppModel, name: String, back: () -> Unit) {
+fun AppScreen(model: AppModel, value: String, open: (String) -> Unit, back: () -> Unit) {
+    // "store:<name>" from All: the store page; a bare name: the app's settings (permissions, Update, Delete)
+    val store = value.startsWith("store:")
+    val name = value.removePrefix("store:")
     val context = LocalContext.current
     val grants = liveGrants()
     LaunchedEffect(Unit) { StoreApps.load() }
@@ -336,13 +335,14 @@ fun AppScreen(model: AppModel, name: String, back: () -> Unit) {
     val offInOs = caps.filter { allowed[it] == true && !osAllows(context, it) }
     Column {
         Bar(app.title, back) {
-            listing?.let { l ->
+            listing?.takeIf { store }?.let { l ->
                 IconButton({ context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(l.page))) }) {
                     Icon(painterResource(R.drawable.ic_open_in_new), "Open on fmc.tools")
                 }
             }
         }
         LazyColumn {
+            if (store && listing != null) {
             // the App Store's header: icon, name, summary, the button
             item {
                 Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -358,7 +358,6 @@ fun AppScreen(model: AppModel, name: String, back: () -> Unit) {
                     }
                 }
             }
-            if (listing != null) {
                 item { Column { InfoStrip(app, listing) } }
                 if (listing.screenshots.isNotEmpty()) item {
                     androidx.compose.foundation.lazy.LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
@@ -397,12 +396,32 @@ fun AppScreen(model: AppModel, name: String, back: () -> Unit) {
                         }
                     }
                 }
-            } else item { Section { Row { Text("On the watch", Modifier.weight(1f)); Text(app.detail, color = Fmc.secondary) } } }
+            } else {
+            item {
+                Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AppIcon(name, 72.dp)
+                    Text(app.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text(app.detail, color = Fmc.secondary)
+                }
+            }
+            if (app.update != null || listing != null) item {
+                Section {
+                    app.update?.let { new ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Version ${versionText(new.version)} is out", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                            GetButton(model, app)
+                        }
+                        if (listing != null) HorizontalDivider()
+                    }
+                    if (listing != null) Text("View in the Store", Modifier.fillMaxWidth().clickable { open("store:$name") })
+                }
+            }
             app.slot?.let { slot ->
                 item {
                     var confirm by remember { mutableStateOf(false) }
                     val scope = rememberCoroutineScope()
-                    Section(footer = "Removes ${app.title} and its data from the watch.") {
+                    Section(footer = "Removes ${app.title} and its data from the watch, and forgets its permissions.") {
                         Text("Delete from the Watch", Modifier.fillMaxWidth().clickable(enabled = name !in AppUpdates.progress) { confirm = true },
                             color = Fmc.danger)
                     }
@@ -455,6 +474,7 @@ fun AppScreen(model: AppModel, name: String, back: () -> Unit) {
                         Text("Reset permissions", Modifier.fillMaxWidth().clickable { resetting = true }, color = Fmc.danger)
                     }
                 }
+            }
             }
         }
     }
@@ -519,11 +539,14 @@ object AppUpdates {
         try {
             kRun(context, model) { tools.fmc.companion.wire.remove(it, slot) }
             DevLog.log(context, "$name removed from slot $slot")
+            // as phones do on uninstall: a reinstall asks again
+            Grants(context).reset(name)
             model.check()
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (_: tools.fmc.companion.wire.InstallError.Busy) {
-            error = "$title or the Apps menu is open on the watch. Go back to the watch face, then try again."
+            // the stub answers BUSY to removing a page's app even behind the face (cmf-watch-sdk docs/app-guide.md)
+            error = "$title is running on the watch. If it is a page next to the watch face, remove the page first: on the watch, long press $title in Apps → Remove page. Else go back to the watch face. Then try again."
         } catch (e: Exception) {
             error = "Couldn't delete $title: ${e.message}"
         } finally {
@@ -538,7 +561,7 @@ fun DeleteDialog(app: WatchApp, dismiss: () -> Unit, delete: () -> Unit) = Alert
     confirmButton = { TextButton({ dismiss(); delete() }) { Text("Delete", color = Fmc.danger) } },
     dismissButton = { TextButton(dismiss) { Text("Cancel") } })
 
-/** The App Store's button: Get, Update or Delete, and the progress while it installs; failures show as a dialog. */
+/** The App Store's button: Get, Update or Installed, and the progress while it installs; failures show as a dialog. */
 @Composable
 fun GetButton(model: AppModel, app: WatchApp, large: Boolean = false) {
     val context = LocalContext.current
@@ -547,15 +570,8 @@ fun GetButton(model: AppModel, app: WatchApp, large: Boolean = false) {
     val width = if (large) 84.dp else 72.dp
     when {
         p != null -> LinearProgressIndicator({ p.toFloat() }, Modifier.width(width))
-        app.slot != null && app.update == null -> {
-            var confirm by remember { mutableStateOf(false) }
-            androidx.compose.material3.OutlinedButton({ confirm = true }, Modifier.widthIn(min = width).height(if (large) 36.dp else 30.dp),
-                colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(contentColor = Fmc.danger),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp)) {
-                Text("Delete", fontWeight = FontWeight.Bold)
-            }
-            if (confirm) DeleteDialog(app, { confirm = false }) { scope.launch { AppUpdates.remove(context, model, app.name, app.slot) } }
-        }
+        app.slot != null && app.update == null ->
+            Text("Installed", Modifier.width(width), color = Fmc.secondary, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
         else -> androidx.compose.material3.Button({ scope.launch { AppUpdates.update(context, model, app.name) } },
             Modifier.widthIn(min = width).height(if (large) 36.dp else 30.dp),
             enabled = model.loader != null && StoreApps.listing(app.name)?.pkg != null,

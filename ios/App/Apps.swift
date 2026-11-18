@@ -198,7 +198,10 @@ struct AppsTab: View {
         @Bindable var perms = Permissions.shared
         NavigationStack(path: $path) {
             AppsView()
-                .navigationDestination(for: String.self) { AppView(name: $0) }
+                .navigationDestination(for: String.self) { value in
+                    // "store:<name>" from All: the store page; a bare name: the app's settings
+                    if value.hasPrefix("store:") { AppView(name: String(value.dropFirst(6)), store: true) } else { AppView(name: value) }
+                }
         }
         .alert("Couldn't update", isPresented: Binding { AppUpdates.shared.error != nil } set: { if !$0 { AppUpdates.shared.error = nil } }) {
             Button("OK") {}
@@ -247,34 +250,31 @@ extension AppUpdates {
         do {
             try await FirmwareModel.remove(slot: slot)
             DevLog.shared.log("\(name) removed from slot \(slot)")
+            // as iOS does on uninstall: a reinstall asks again
+            Permissions.shared.reset(name)
             await watch.check()
         } catch InstallError.busy {
-            error = String(localized: "\(title) or the Apps menu is open on the watch. Go back to the watch face, then try again.")
+            // the stub answers BUSY to removing a page's app even behind the face (cmf-watch-sdk docs/app-guide.md)
+            error = String(localized: "\(title) is running on the watch. If it is a page next to the watch face, remove the page first: on the watch, long press \(title) in Apps → Remove page. Else go back to the watch face. Then try again.")
         } catch {
             self.error = String(localized: "Couldn't delete \(title): \(error.localizedDescription)")
         }
     }
 }
 
-/// The App Store's button: Get, Update or Delete, and the progress while it installs.
+/// The App Store's button: Get, Update or Installed, and the progress while it installs.
 struct GetButton: View {
     @Environment(WatchModel.self) private var watch
     let app: WatchApp
     var large = false
-    @State private var deleting = false
 
     var body: some View {
         let width: CGFloat = large ? 84 : 72
         if let p = AppUpdates.shared.progress[app.name] {
             ProgressView(value: p).frame(width: width)
-        } else if let slot = app.slot, app.update == nil {
-            Button(role: .destructive) { deleting = true } label: {
-                Text("Delete").fontWeight(.bold).frame(minWidth: width - 24)
-            }
-            .buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(large ? .regular : .small).tint(.red)
-            .confirmationDialog("Delete \(app.title) from the watch?", isPresented: $deleting, titleVisibility: .visible) {
-                Button("Delete", role: .destructive) { Task { await AppUpdates.shared.remove(app.name, slot: slot, watch) } }
-            } message: { Text("Its data on the watch goes too.") }
+        } else if app.slot != nil, app.update == nil {
+            Text("Installed").font(large ? .subheadline.weight(.semibold) : .footnote.weight(.semibold))
+                .foregroundStyle(.secondary).frame(minWidth: width)
         } else {
             Button { Task { await AppUpdates.shared.update(app.name, watch) } } label: {
                 Text(app.slot == nil ? "Get" : "Update").fontWeight(.bold).frame(minWidth: width - 24)
@@ -293,7 +293,7 @@ struct AppsView: View {
     var body: some View {
         // Installed is the watch's list: nothing until it is read, not the apps that only asked for something
         let loader = watch.listedLoader
-        let apps = showAll ? WatchApp.store(loader, perms) : loader == nil ? [] : WatchApp.all(loader, perms)
+        let apps = showAll ? WatchApp.store(loader, perms) : loader == nil ? [] : WatchApp.all(loader, perms).filter { $0.slot != nil }
         // first load: placeholder rows; a refresh keeps the rows it has
         let loading = apps.isEmpty && (showAll ? !StoreApps.shared.loaded : watch.isChecking)
         List {
@@ -346,7 +346,7 @@ struct AppsView: View {
     }
 
     @ViewBuilder private func installed(_ apps: [WatchApp]) -> some View {
-        let on = apps.filter { $0.slot != nil }, off = apps.filter { $0.slot == nil }
+        let on = apps.filter { $0.slot != nil }
         let updates = on.filter { $0.update != nil }, current = on.filter { $0.update == nil }
         if !updates.isEmpty {
             Section {
@@ -360,19 +360,10 @@ struct AppsView: View {
         if !current.isEmpty {
             Section("On the watch") { ForEach(current) { row($0) } }
         }
-        if !off.isEmpty {
-            Section {
-                ForEach(off) { row($0) }
-            } header: {
-                Text(watch.listedLoader == nil ? "Asked for permissions" : "Not on the watch")
-            } footer: {
-                if watch.listedLoader == nil { Text("Connect on the Watch tab to see every app on the watch.") }
-            }
-        }
     }
 
     private func row(_ app: WatchApp) -> some View {
-        NavigationLink(value: app.name) {
+        NavigationLink(value: showAll ? "store:\(app.name)" : app.name) {
             HStack(spacing: 12) {
                 AppIcon(name: app.name)
                 VStack(alignment: .leading, spacing: 1) {
@@ -398,14 +389,39 @@ struct AppView: View {
     private let services = PhoneServices.shared
     @State private var resetting = false
     @State private var deleting = false
+    /// The store page (from All): description, screenshots, Get. Else the app's settings: permissions, Update, Delete.
+    let store: Bool
 
-    init(name: String) { self.name = name }
+    init(name: String, store: Bool = false) { self.name = name; self.store = store }
 
     var body: some View {
         let app = WatchApp.all(watch.listedLoader, perms).first { $0.name == name } ?? WatchApp(name: name, header: nil, slot: nil)
         let caps = perms.caps(name)
         let listing = StoreApps.shared.listing(name)
         List {
+            if store, let listing { storeSections(app, listing) } else { settingsSections(app, caps, listing) }
+        }
+        .navigationTitle(app.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if store, let listing {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Link(destination: listing.page) { Image(systemName: "safari") }.accessibilityLabel("Open on fmc.tools")
+                }
+            }
+        }
+        .task { await StoreApps.shared.load() }
+        .confirmationDialog("Reset permissions for \(name)?", isPresented: $resetting, titleVisibility: .visible) {
+            Button("Reset", role: .destructive) { perms.reset(name) }
+        }
+        .confirmationDialog("Delete \(app.title) from the watch?", isPresented: $deleting, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                if let slot = app.slot { Task { await AppUpdates.shared.remove(name, slot: slot, watch) } }
+            }
+        } message: { Text("Its data on the watch goes too.") }
+    }
+
+    @ViewBuilder private func storeSections(_ app: WatchApp, _ listing: StoreApps.Listing) -> some View {
             // the App Store's header: icon, name, summary, the button, the facts. A section header, not a row: rows
             // clip to the section's rounded corners, a header spans the screen
             Section {} header: {
@@ -414,25 +430,24 @@ struct AppView: View {
                     AppIcon(name: name, side: 108)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(app.title).font(.title2.weight(.bold)).lineLimit(2)
-                        if let listing, !listing.summary.isEmpty {
+                        if !listing.summary.isEmpty {
                             Text(listing.summary).font(.subheadline).foregroundStyle(.secondary).lineLimit(3)
                         }
                         Spacer(minLength: 8)
-                        if listing != nil || app.slot != nil { GetButton(app: app, large: true) }
+                        GetButton(app: app, large: true)
                     }
                     .frame(maxWidth: .infinity, minHeight: 108, alignment: .leading)
                 }
-                if listing?.package != nil, watch.listedLoader == nil {
+                if listing.package != nil, watch.listedLoader == nil {
                     Text("Connect on the Watch tab to install.").font(.footnote).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                if let listing { InfoStrip(app: app, listing: listing).padding(.horizontal, -20) }
+                InfoStrip(app: app, listing: listing).padding(.horizontal, -20)
                 }
                 .textCase(nil)
                 .foregroundStyle(.primary)
                 .padding(.top, 8)
             }
-            if let listing {
                 if !listing.screenshots.isEmpty {
                     Section {} header: {
                         VStack(alignment: .leading, spacing: 8) {
@@ -467,15 +482,36 @@ struct AppView: View {
                         Link(destination: url) { LabeledContent("Source code") { Image(systemName: "arrow.up.right.square") } }
                     }
                 }
-            } else {
-                Section { LabeledContent("On the watch", value: app.detail) }
+    }
+
+    @ViewBuilder private func settingsSections(_ app: WatchApp, _ caps: [String], _ listing: StoreApps.Listing?) -> some View {
+            Section {
+                VStack(spacing: 8) {
+                    AppIcon(name: name, side: 60)
+                    Text(app.title).font(.title3.weight(.semibold))
+                    Text(app.detail).font(.subheadline).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .listRowBackground(Color.clear)
+            }
+            if app.update != nil || listing != nil {
+                Section {
+                    if let new = app.update {
+                        HStack {
+                            Text("Version \(versionText(new.version)) is out").fontWeight(.semibold)
+                            Spacer()
+                            GetButton(app: app)
+                        }
+                    }
+                    if listing != nil { NavigationLink("View in the Store", value: "store:\(name)") }
+                }
             }
             if app.slot != nil {
                 Section {
                     Button("Delete from the Watch", role: .destructive) { deleting = true }
                         .disabled(AppUpdates.shared.progress[name] != nil)
                 } footer: {
-                    Text("Removes \(app.title) and its data from the watch.")
+                    Text("Removes \(app.title) and its data from the watch, and forgets its permissions.")
                 }
             }
             if caps.isEmpty {
@@ -521,25 +557,6 @@ struct AppView: View {
                     Text("\(app.title) asks again the next time it needs something.")
                 }
             }
-        }
-        .navigationTitle(app.title)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if let listing {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Link(destination: listing.page) { Image(systemName: "safari") }.accessibilityLabel("Open on fmc.tools")
-                }
-            }
-        }
-        .task { await StoreApps.shared.load() }
-        .confirmationDialog("Reset permissions for \(name)?", isPresented: $resetting, titleVisibility: .visible) {
-            Button("Reset", role: .destructive) { perms.reset(name) }
-        }
-        .confirmationDialog("Delete \(app.title) from the watch?", isPresented: $deleting, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) {
-                if let slot = app.slot { Task { await AppUpdates.shared.remove(name, slot: slot, watch) } }
-            }
-        } message: { Text("Its data on the watch goes too.") }
     }
 
     private func note(_ cap: String) -> String? {
