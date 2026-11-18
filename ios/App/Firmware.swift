@@ -71,7 +71,8 @@ import WireKit
             var url = Account.base.appending(path: "api/collections/firmwares/records")
             url.append(queryItems: [
                 .init(name: "filter", value: "device = 'watch_pro_2' && (kind = 'patched' || kind = 'loader')"),
-                .init(name: "sort", value: "-updated"),
+                // newest first by creation: a download bumps the live record's `updated`, which hid a moderator's draft
+                .init(name: "sort", value: "-created"),
                 .init(name: "fields", value: "id,collectionId,name,kind,version,image,stub,published"),
             ])
             var r = URLRequest(url: url)

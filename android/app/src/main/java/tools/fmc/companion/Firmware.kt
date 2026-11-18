@@ -102,7 +102,8 @@ object FirmwareModel {
         try {
             fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
             val filter = enc("device = 'watch_pro_2' && (kind = 'patched' || kind = 'loader')")
-            val items = JSONObject(http("GET", "$FMC/api/collections/firmwares/records?filter=$filter&sort=-updated" +
+            // newest first by creation: a download bumps the live record's `updated`, which hid a moderator's draft
+            val items = JSONObject(http("GET", "$FMC/api/collections/firmwares/records?filter=$filter&sort=-created" +
                 "&fields=id,collectionId,name,kind,version,image,stub,published", token = token)).getJSONArray("items")
             val records = (0 until items.length()).map(items::getJSONObject)
             fun release(kind: String) = records.firstOrNull { it.optString("kind") == kind }?.let {
