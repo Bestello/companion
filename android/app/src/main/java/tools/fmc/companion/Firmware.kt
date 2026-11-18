@@ -14,7 +14,15 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalView
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,12 +43,15 @@ import tools.fmc.companion.wire.InstallError
 import tools.fmc.companion.wire.KSession
 import tools.fmc.companion.wire.LoaderState
 import tools.fmc.companion.wire.PackageHeader
+import tools.fmc.companion.wire.checkOtaTarget
+import tools.fmc.companion.wire.flashFirmware
+import tools.fmc.companion.wire.inspectOtaImage
 import tools.fmc.companion.wire.install
 import tools.fmc.companion.wire.parseHeader
 
 // Firmware: what the watch runs (the patched stub and the App Loader) against what fmc.tools publishes (`firmwares`,
 // kinds `patched` and `loader`), checked right after each connect. The App Loader updates from here over K; the
-// stub needs the stock OTA, which the app does not do yet. As ios/App/Firmware.swift.
+// patched firmware goes over the stock OTA (wire/Ota.kt, as fmc.tools' flashFirmware). As ios/App/Firmware.swift.
 
 object FirmwareModel {
     /** `stub`: STUB_VERSION for the patched firmware. */
@@ -56,6 +67,18 @@ object FirmwareModel {
     var error by mutableStateOf<String?>(null)
         private set
     var progress by mutableStateOf<Double?>(null)
+        private set
+
+    /** The firmware update under way: what it is doing and, once the watch reports a percent, how far. */
+    class Flash(val step: String, val percent: Int? = null, val started: Long = System.currentTimeMillis()) {
+        /** Seconds left, from the watch's own percent: it skips what it has, so the rate is what counts. */
+        val left: Long? get() = percent?.takeIf { it in 2..99 }?.let { p ->
+            (System.currentTimeMillis() - started) / 1000 * (100 - p) / p
+        }
+    }
+    var flash by mutableStateOf<Flash?>(null)
+        private set
+    var flashed by mutableStateOf(false)
         private set
 
     /** The store's loader differs from the one on the watch (or the watch has none). Its header version is always 1. */
@@ -99,6 +122,43 @@ object FirmwareModel {
         }
     }
 
+    /**
+     * The store's patched firmware over the stock OTA. The image is checked before connecting and the watch's model
+     * before the stock session opens (ota-image.ts checkOtaTarget): nothing goes out for a refused one. The services'
+     * listener holds K on the same link: off meanwhile.
+     */
+    suspend fun flashFirmware(context: Context, model: AppModel) {
+        val file = check?.firmware?.file ?: return
+        if (flash != null) return
+        flash = Flash("Downloading the firmware…")
+        flashed = false
+        error = null
+        val services = model.services
+        try {
+            val image = download(file)
+            // 57 MB of CRCs: off the main thread
+            val info = withContext(Dispatchers.Default) { inspectOtaImage(image) }
+            flash = Flash("Connecting to the watch…")
+            if (services) RpcService.stop(context)
+            withStockSession(context, model.store, before = { checkOtaTarget(info, it.watchName) }) { session, _ ->
+                flash = Flash("Sending the firmware…")
+                session.flashFirmware(image) { p ->
+                    val f = flash
+                    flash = Flash("Sending the firmware…", p, if (f?.percent == null) System.currentTimeMillis() else f.started)
+                }
+            }
+            DevLog.log(context, "Firmware sent: ${check?.firmware?.version}")
+            flashed = true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error = "Couldn't update the firmware: ${e.message}"
+        } finally {
+            flash = null
+            if (services) RpcService.start(context)
+        }
+    }
+
     /** Installs the store's App Loader over K, then reads the watch again. */
     suspend fun updateLoader(context: Context, model: AppModel) {
         val pkg = check?.loaderPackage ?: return
@@ -133,6 +193,29 @@ fun FirmwareScreen(model: AppModel, back: () -> Unit) {
     val state = model.loader
     val connected = model.phase is Phase.Checked
     LaunchedEffect(Unit) { if (fm.check == null) fm.refresh(model.account.token) }
+    var confirmFlash by remember { mutableStateOf(false) }
+    // a 57 MB update: the screen stays on while it runs, and the time left ticks
+    val view = LocalView.current
+    val flashing = fm.flash != null
+    DisposableEffect(flashing) {
+        view.keepScreenOn = flashing
+        onDispose { view.keepScreenOn = false }
+    }
+    var tick by remember { mutableStateOf(0) }
+    LaunchedEffect(flashing) { while (flashing) { delay(1000); tick++ } }
+    if (tick < 0) return // reading tick recomposes the time left each second
+    if (confirmFlash) AlertDialog(
+        onDismissRequest = { confirmFlash = false },
+        title = { Text("Close Nothing X first") },
+        text = {
+            Text("The watch talks to one app at a time. Close Nothing X (swipe it away in Recents), then install.\n\n" +
+                "The watch should be charged and the phone next to it. Keep this screen open until the update is sent; the watch then installs it and restarts.\n\n" +
+                "Afterwards Nothing X may not see the watch. Then forget the watch in Bluetooth settings and add it again in Nothing X.")
+        },
+        // the model's scope: leaving the page doesn't cut the update short
+        confirmButton = { TextButton({ confirmFlash = false; model.viewModelScope.launch { fm.flashFirmware(context, model) } }) { Text("Install") } },
+        dismissButton = { TextButton({ confirmFlash = false }) { Text("Cancel") } },
+    )
 
     @Composable
     fun row(label: String, detail: String? = null, value: @Composable () -> Unit) =
@@ -163,11 +246,27 @@ fun FirmwareScreen(model: AppModel, back: () -> Unit) {
             }
             item {
                 val fwUpdate = fm.firmwareUpdate(state)
-                Section("fmc.tools", footer = if (fwUpdate) "The firmware updates over the stock OTA, which this app doesn't do yet." else null) {
+                val offer = fwUpdate || (state == null && connected)
+                val f = fm.flash
+                val footer = when {
+                    f != null -> f.percent?.let { p ->
+                        val left = f.left?.let { s -> if (s >= 60) ", about ${s / 60} min ${s % 60} s left" else ", about $s s left" } ?: ""
+                        "Sending the firmware: $p%$left. Keep the phone next to the watch and this screen open."
+                    } ?: f.step
+                    fm.flashed -> "Firmware sent. The watch installs it and restarts by itself, which takes a few minutes. Then connect again on the Watch tab."
+                    offer -> "The firmware is about 57 MB. Before installing: charge the watch, keep the phone next to it, and close Nothing X."
+                    else -> null
+                }
+                Section("fmc.tools", footer = footer) {
                     fm.check?.firmware?.let { fw ->
                         row(fw.name, "${fw.version} · stub ${fw.stub}") {
-                            Text(if (fwUpdate) "Update available" else if (state == null) "" else "Up to date",
-                                color = if (fwUpdate) Fmc.warning else Fmc.secondary)
+                            when {
+                                f != null -> LinearProgressIndicator({ (f.percent ?: 0) / 100f }, Modifier.width(80.dp))
+                                offer -> Button({ confirmFlash = true }, enabled = fm.progress == null) {
+                                    Text(if (state == null) "Install" else "Update")
+                                }
+                                else -> Text(if (state == null) "" else "Up to date", color = Fmc.secondary)
+                            }
                         }
                         HorizontalDivider()
                     }

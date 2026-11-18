@@ -10,6 +10,6 @@ let package = Package(
     products: [.library(name: "WireKit", targets: ["WireKit"])],
     targets: [
         .target(name: "WireKit"),
-        .testTarget(name: "WireKitTests", dependencies: ["WireKit"], resources: [.copy("vectors.json"), .copy("watchface-vectors.json"), .copy("rpc-vectors.json")]),
+        .testTarget(name: "WireKitTests", dependencies: ["WireKit"], resources: [.copy("vectors.json"), .copy("watchface-vectors.json"), .copy("rpc-vectors.json"), .copy("ota-vectors.json")]),
     ]
 )

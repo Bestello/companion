@@ -65,9 +65,9 @@ enum FaceInstall {
     }
 
     /// Connects and opens a stock session (a new bind only when the saved key is refused, and `bind` allows one:
-    /// it pops up on the watch), then `body`.
-    @MainActor private static func session<T>(bind: Bool = true,
-                                              _ body: (StockSession, String) async throws -> T) async throws -> T {
+    /// it pops up on the watch), then `body`. `before` sees the link before anything is sent: it can still refuse.
+    @MainActor static func session<T>(bind: Bool = true, before: @MainActor (BLELink) throws -> Void = { _ in },
+                                      _ body: (StockSession, String) async throws -> T) async throws -> T {
         // the stock session binds the watch: the RPC listener waits it out
         RPCListener.shared.stop()
         defer { RPCListener.shared.start() }
@@ -79,6 +79,7 @@ enum FaceInstall {
         }
         try await link.connect(scan: true)
         watchdog.cancel()
+        try before(link)
         let watch = link.watchID?.uuidString ?? ""
         var secret = Keychain.get("k-\(watch)")
         if secret == nil {

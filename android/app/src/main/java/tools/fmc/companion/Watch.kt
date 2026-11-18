@@ -130,14 +130,16 @@ const val CAPACITY = 6
 
 /**
  * Connects and opens a stock session (a new bind only when the saved key is refused, and [bind] allows one: it
- * pops up on the watch), then [body].
+ * pops up on the watch), then [body]. [before] sees the link before anything is sent: it can still refuse.
  */
-private suspend fun <T> withStockSession(
-    context: Context, store: SecureStore, bind: Boolean = true, body: suspend (StockSession, String) -> T,
+internal suspend fun <T> withStockSession(
+    context: Context, store: SecureStore, bind: Boolean = true, before: (BleLink) -> Unit = {},
+    body: suspend (StockSession, String) -> T,
 ): T {
     val link = BleLink(context)
     try {
         withTimeout(30_000) { link.connect(scan = true) }
+        before(link)
         val watch = link.watchId
         var secret = store["k-$watch"]
         if (secret == null) {

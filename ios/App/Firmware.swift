@@ -1,9 +1,10 @@
 import SwiftUI
+import UIKit
 import WireKit
 
 // Firmware: what the watch runs (the patched stub and the App Loader) against what fmc.tools publishes (`firmwares`,
 // kinds `patched` and `loader`), checked right after each connect. The App Loader updates from here over K; the
-// stub needs the stock OTA, which the app does not do yet.
+// patched firmware goes over the stock OTA (WireKit Ota.swift, as fmc.tools' flashFirmware).
 
 @MainActor @Observable final class FirmwareModel {
     static let shared = FirmwareModel()
@@ -28,6 +29,22 @@ import WireKit
     private(set) var checking = false
     private(set) var error: String?
     private(set) var progress: Double?
+    /// The firmware update under way: what it is doing and, once the watch reports a percent, how far.
+    private(set) var flash: Flash?
+    private(set) var flashed = false
+
+    struct Flash {
+        var step: LocalizedStringKey
+        var percent: Int?
+        var started = Date()
+
+        /// From the watch's own percent: it skips what it has, so the rate is what counts.
+        var left: Duration? {
+            guard let percent, percent >= 2, percent < 100 else { return nil }
+            let elapsed = Date().timeIntervalSince(started)
+            return .seconds(elapsed / Double(percent) * Double(100 - percent))
+        }
+    }
 
     /// The store's loader differs from the one on the watch (or the watch has none).
     func loaderUpdate(_ state: LoaderState?) -> Bool {
@@ -80,6 +97,40 @@ import WireKit
         }
     }
 
+    /// The store's patched firmware over the stock OTA. The image is checked before connecting and the watch's
+    /// model before the stock session opens (ota-image.ts checkOtaTarget): nothing goes out for a refused one.
+    func flashFirmware() async {
+        guard let file = check?.firmware?.file, flash == nil else { return }
+        flash = Flash(step: "Downloading the firmware…")
+        flashed = false
+        error = nil
+        UIApplication.shared.isIdleTimerDisabled = true
+        defer {
+            flash = nil
+            UIApplication.shared.isIdleTimerDisabled = false
+        }
+        do {
+            let (image, _) = try await URLSession.shared.data(from: file)
+            // 57 MB of CRCs: off the main actor
+            let info = try await Task.detached { try inspectOtaImage(image) }.value
+            flash?.step = "Connecting to the watch…"
+            try await FaceInstall.session(before: { link in try checkOtaTarget(info, watchName: link.watchName) }) {
+                session, _ in
+                await MainActor.run { self.flash = Flash(step: "Sending the firmware…") }
+                try await session.flashFirmware(image) { p in
+                    Task { @MainActor in
+                        if self.flash?.percent == nil { self.flash?.started = Date() }
+                        self.flash?.percent = p
+                    }
+                }
+            }
+            DevLog.shared.log("Firmware sent: \(check?.firmware?.version ?? "?")")
+            flashed = true
+        } catch {
+            self.error = String(localized: "Couldn't update the firmware: \(error.localizedDescription)")
+        }
+    }
+
     /// One package over K (the loader or an app, into its own slot), with the RPC listener off meanwhile.
     static func install(_ pkg: Data, progress: @escaping @Sendable (Double) -> Void) async throws {
         RPCListener.shared.stop()
@@ -119,6 +170,7 @@ struct FirmwareView: View {
     @Environment(WatchModel.self) private var watch
     @Environment(Account.self) private var account
     private var model = FirmwareModel.shared
+    @State private var confirmFlash = false
 
     var body: some View {
         let state = watch.loader
@@ -143,8 +195,15 @@ struct FirmwareView: View {
             Section {
                 if let fw = model.check?.firmware {
                     LabeledContent {
-                        Text(model.firmwareUpdate(state) ? "Update available" : (state == nil ? "" : "Up to date"))
-                            .foregroundStyle(model.firmwareUpdate(state) ? Color.fmcAccent : .secondary)
+                        if model.flash != nil {
+                            ProgressView(value: Double(model.flash?.percent ?? 0), total: 100).frame(width: 80)
+                        } else if model.firmwareUpdate(state) || (state == nil && connected) {
+                            Button(state == nil ? "Install" : "Update") { confirmFlash = true }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(model.progress != nil)
+                        } else {
+                            Text(state == nil ? "" : "Up to date").foregroundStyle(.secondary)
+                        }
                     } label: {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(fw.name)
@@ -186,15 +245,39 @@ struct FirmwareView: View {
                 Text("fmc.tools")
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
-                    if model.firmwareUpdate(state) {
-                        Text("The firmware updates over the stock OTA, which this app doesn't do yet.")
+                    if let f = model.flash {
+                        flashStatus(f)
+                    } else if model.flashed {
+                        Text("Firmware sent. The watch installs it and restarts by itself, which takes a few minutes. Then connect again on the Watch tab.")
+                    } else if model.firmwareUpdate(state) || (state == nil && connected) {
+                        Text("The firmware is about 57 MB. Before installing: charge the watch, keep the phone next to it, and close Nothing X.")
                     }
                     if let error = model.error { Text(error).foregroundStyle(.red) }
                 }
             }
         }
         .navigationTitle("Firmware")
+        .alert("Close Nothing X first", isPresented: $confirmFlash) {
+            Button("Install") { Task { await model.flashFirmware() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The watch talks to one app at a time. Close Nothing X (swipe it away in the app switcher), then install.\n\nThe watch should be charged and the phone next to it. Keep this screen open until the update is sent; the watch then installs it and restarts.\n\nAfterwards Nothing X may not see the watch. Then forget the watch in Bluetooth settings and add it again in Nothing X.")
+        }
         .task { if model.check == nil { await model.refresh(account) } }
+    }
+
+    private func flashStatus(_ f: FirmwareModel.Flash) -> some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            if let p = f.percent {
+                if let left = f.left {
+                    Text("Sending the firmware: \(p)%, about \(left.formatted(.units(allowed: [.hours, .minutes, .seconds], width: .abbreviated, maximumUnitCount: 2))) left. Keep the phone next to the watch and this screen open.")
+                } else {
+                    Text("Sending the firmware: \(p)%. Keep the phone next to the watch and this screen open.")
+                }
+            } else {
+                Text(f.step)
+            }
+        }
     }
 
     private var connected: Bool { if case .checked = watch.phase { true } else { false } }

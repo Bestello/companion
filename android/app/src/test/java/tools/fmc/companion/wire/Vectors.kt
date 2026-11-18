@@ -11,6 +11,8 @@ object Vectors {
     private fun load(name: String) = JSONObject(File(System.getProperty("vectors"), name).readText())
     val k: JSONObject by lazy { load("vectors.json") }
     val face: JSONObject by lazy { load("watchface-vectors.json") }
+    /** Made by tools/ota-vectors.ts from the site's inspectOtaImage and Watch.flashFirmware. */
+    val ota: JSONObject by lazy { load("ota-vectors.json") }
 
     val pkg get() = k.getJSONObject("package")
     /** INFO's reply for a slot holding the vector package, without the status byte. */

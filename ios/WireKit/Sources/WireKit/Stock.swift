@@ -21,8 +21,12 @@ public enum StockCmd {
     public static let wfList = k(0x9055)
     /// ble-protocol.ts `time`, `fwGet`
     public static let time = k(0x8004), fwGet = k(0x8006)
+    /// The firmware update (ble.ts flashFirmware, cmf-watch-sdk docs/ota.md). a043/a044 end it, meaning undocumented.
+    public static let otaBeginReq = k(0x9052), otaBeginRep = k(0xA052), otaStartReq = k(0x9040), otaStartRep = k(0xA040)
+    public static let otaChunkReq = k(0xA042), otaChunkWrite = k(0x9042), otaVerdict = k(0xA041), otaCommit = k(0x9041)
+    public static let otaStatus43 = k(0xA043), otaStatus44 = k(0xA044)
     /// Sent and read in the clear (body ‖ crc32le); `authFailed` because the watch could not decrypt.
-    static let plain: Set<UInt32> = [authPairReq, authPairRep, wfChunkWrite, authFailed]
+    static let plain: Set<UInt32> = [authPairReq, authPairRep, wfChunkWrite, otaChunkWrite, authFailed]
     /// What goes over the data pair (ffe1); everything else goes over fff2.
     static let data: Set<UInt32> = [wfInit1Req, wfInit2Req, wfChunkWrite, wfFinishAck2]
     /// Not a command: a `0x0049` that opens only with the all-zero key (the bind popup was confirmed).
@@ -36,12 +40,18 @@ public enum DataUuid {
     public static let notify = "02F00000-0000-0000-0000-00000000FFE2"
 }
 
+/// `UUID.otaWrite` / `otaRead`: the firmware update's pair.
+public enum OtaUuid {
+    public static let write = "02F00000-0000-0000-0000-00000000FF01"
+    public static let notify = "02F00000-0000-0000-0000-00000000FF02"
+}
+
 /// `Codec.encode`: frames of at most `mtu` bytes; sealed chunks of `(mtu-11)/16*16 - 5` plain bytes, plain chunks of
-/// `mtu - 20`. Header: F5, length, c1, count, index, c2 (big endian).
-public func stockFrames(_ cmd: UInt32, _ payload: Data, key: Data?, mtu: Int = 180) -> [Data] {
+/// `mtu - 20`, or `plainSize` (the firmware's 224, proven on hardware). Header: F5, length, c1, count, index, c2 (big endian).
+public func stockFrames(_ cmd: UInt32, _ payload: Data, key: Data?, mtu: Int = 180, plainSize: Int? = nil) -> [Data] {
     var chunks: [Data] = []
     let isPlain = StockCmd.plain.contains(cmd)
-    let size = isPlain ? mtu - 20 : (mtu - 11) / 16 * 16 - 5
+    let size = isPlain ? plainSize ?? mtu - 20 : (mtu - 11) / 16 * 16 - 5
     if payload.isEmpty {
         chunks = [Data()]
     } else {
@@ -158,7 +168,7 @@ public actor StockSession {
     let mtu: Int
     var key: Data?
     private var parser = StockParser()
-    private let inbox = Inbox<(UInt32, Data)>()
+    let inbox = Inbox<(UInt32, Data)>()
     /// Latest `a055`: the dials the watch reported (side-loaded ones are missing from it).
     public private(set) var reported: [UInt32]?
     /// Every entry of the latest `a055`, the photo face (FFFFFFFF) included: what a set sends back.
@@ -168,12 +178,12 @@ public actor StockSession {
     /// Latest `a055` header, raw, for field reports.
     public private(set) var dialHeader: Data?
 
-    public init(link: Link, mtu: Int = 180) {
-        (self.link, self.mtu) = (link, mtu)
+    public init(link: Link, mtu: Int = 180, key: Data? = nil) {
+        (self.link, self.mtu, self.key) = (link, mtu, key)
         let (stream, sink) = AsyncStream<Data>.makeStream()
         link.onNotify { uuid, value in
             // K frames on fff1 don't open with F5: the parser drops them
-            if [DataUuid.notify, Uuid.cmdNotify].contains(uuid.uppercased()) { sink.yield(value) }
+            if [DataUuid.notify, OtaUuid.notify, Uuid.cmdNotify].contains(uuid.uppercased()) { sink.yield(value) }
         }
         Task { [weak self] in
             for await f in stream { await self?.feed(f) }
