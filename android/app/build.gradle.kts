@@ -15,8 +15,9 @@ android {
         // Android 12: BLUETOOTH_SCAN/CONNECT without the location permission.
         minSdk = 31
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI passes -PversionCode/-PversionName (.github/workflows/android-release.yml): every release counts up
+        versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 1
+        versionName = findProperty("versionName") as String? ?: "0.1.0"
     }
 
     // The release key, outside the repo: android/keystore.properties (file, storePassword, keyAlias, keyPassword).
