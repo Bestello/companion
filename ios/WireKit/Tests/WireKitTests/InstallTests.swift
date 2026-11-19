@@ -8,11 +8,15 @@ final class FakeInstaller: Requester, @unchecked Sendable {
     var calls: [(UInt16, Data)] = []
     var beginStatus: Status = .ok
     var written = 0
+    /// INFO 0xFE: a stub 1 answers it as a bad slot.
+    var stub = Data([1])
 
     func call(_ c2: UInt16, _ payload: Data, timeout: Duration) async throws -> Data {
         calls.append((c2, payload))
         switch c2 {
-        case Cmd.info: return Data([0]) + (used[Int(payload[payload.startIndex])] ?? Data())
+        case Cmd.info:
+            if payload.first == stubSlot { return stub }
+            return Data([0]) + (used[Int(payload[payload.startIndex])] ?? Data())
         case Cmd.begin: return Data([beginStatus.rawValue])
         case Cmd.data:
             written = Int(payload.le(UInt32.self, at: 0)) + payload.count - 4
@@ -70,5 +74,24 @@ let header = hex(pkg.info_reply_hex).dropFirst()
         h[8] = UInt8(ascii: "a") + UInt8(i)
         f.used[i] = h
     }
-    await #expect(throws: InstallError.noFreeSlot) { try await install(f, package: hex(pkg.hex)) { _ in } }
+    await #expect(throws: InstallError.noFreeSlot(slots: 8)) { try await install(f, package: hex(pkg.hex)) { _ in } }
+    #expect(!f.calls.contains { $0.0 == Cmd.info && $0.1.first == 8 }, "stub 1: slots 0…7 only")
+}
+
+@Test func stubSevenHasSixteenSlots() async throws {
+    #expect([1, 6, 7, 8].map { appSlots(stub: $0) } == [8, 8, 16, 16])
+    let f = FakeInstaller()
+    f.stub = Data([0, 7, 0, 0, 0, 4])
+    for i in 0..<8 {
+        var h = Data(header)
+        h[8] = UInt8(ascii: "a") + UInt8(i)
+        f.used[i] = h
+    }
+    #expect(try await install(f, package: hex(pkg.hex)) { _ in } == 8, "the first free slot past 7")
+    for i in 8..<16 {
+        var h = Data(header)
+        h[8] = UInt8(ascii: "a") + UInt8(i)
+        f.used[i] = h
+    }
+    await #expect(throws: InstallError.noFreeSlot(slots: 16)) { try await install(f, package: hex(pkg.hex)) { _ in } }
 }

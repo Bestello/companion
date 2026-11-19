@@ -37,6 +37,14 @@ class LoaderTest {
         assertEquals(mapOf(2 to Vectors.pkgHeader), s.apps)
     }
 
+    @Test fun stubSevenReadsSixteenSlots() = runBlocking {
+        val w = FakeWatch().apply { stub = bytes(0, 7, 0, 0, 0, 4) }
+        w.used[15] = Vectors.header
+        assertEquals(mapOf(15 to Vectors.pkgHeader), readLoader(w)!!.apps)
+        w.stub = bytes(0, 6, 0, 0, 0, 4)
+        assertEquals(emptyMap(), readLoader(w)!!.apps, "stub 6: slot 15 isn't read")
+    }
+
     @Test fun garbledStubReplyThrows() = runBlocking {
         val w = FakeWatch().apply { stub = bytes(0, 5) }
         assertEquals(WireError.Refused(0), assertFailsWith<WireError.Refused> { readLoader(w) })

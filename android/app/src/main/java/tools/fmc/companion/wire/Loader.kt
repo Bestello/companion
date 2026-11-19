@@ -37,6 +37,6 @@ suspend fun readLoader(s: Requester, probeMs: Long = 2500): LoaderState? {
         return if (r.isNotEmpty() && r.u8(0) == Status.OK.code) parseHeader(r.copyOfRange(1, r.size)) else null
     }
     val apps = sortedMapOf<Int, PackageHeader>()
-    for (slot in 0 until SLOTS) read(slot)?.let { apps[slot] = it }
+    for (slot in 0 until appSlots(stub.version)) read(slot)?.let { apps[slot] = it }
     return LoaderState(stub, read(LOADER_SLOT), apps)
 }

@@ -29,6 +29,17 @@ To build your own companion, take the transport (`Session`, `Frame`, `BleLink`) 
 and services, and check them against `ios/WireKit/Tests/WireKitTests/rpc-vectors.json`. New methods go into
 miniapp-rpc.md first.
 
+## Order and slots
+
+Edit on the Installed list (iOS EditButton and drag, Android Edit and up/down arrows) sets the order of the apps
+on the watch. It is a list of package names kept on the phone per watch (iOS UserDefaults `app-order`, keyed by the
+watch's BLE identifier; Android prefs `app`, `order|<watch id>`), and the list shows that order; apps it doesn't name
+come after, by slot. Sending it to the watch waits on the stub's command: `AppOrder.send` on both platforms is a
+TODO until cmf-watch-sdk `docs/app-order.md` (branch `app-order`) fixes the bytes.
+
+The stub has 8 app slots before version 7 and 16 from it (`appSlots(stub:)` in WireKit, `appSlots` in the Android
+wire). The version is INFO on slot `0xFE`; `readLoader`, `installed` and `install` read that many.
+
 ## One link, several sessions
 
 There's one BLE link, the one Nothing X holds, but more than one client can use it. Android shares the LE link between

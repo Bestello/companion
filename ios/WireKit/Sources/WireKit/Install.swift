@@ -2,8 +2,17 @@ import Foundation
 
 // Installing an app package from the phone over K (src/wp2apps/install.py): INFO, BEGIN, DATA…, END.
 
-public let slots = 8
 public let loaderSlot = 0xFF
+
+/// App slots on the watch, 0…n−1: 8 before stub 7, 16 from stub 7.
+/// TODO(app-order): stub 7 and its 16 slots come from the cmf-watch-sdk branch app-order (docs/app-order.md and the
+/// stub's docs there, not written yet); check this against them when they are.
+public func appSlots(stub: UInt32) -> Int { stub >= 7 ? 16 : 8 }
+
+/// The stub's release from INFO on 0xFE; 1 when the reply doesn't say.
+func stubVersion(_ s: Requester) async throws -> UInt32 {
+    parseStubReply(try await s.call(Cmd.info, Data([stubSlot])))?.version ?? 1
+}
 let headerSize = 64, dataMax = 128
 
 /// What install needs from a session: one request, the plain reply. KSession in the app, a fake in the tests.
@@ -30,7 +39,9 @@ public struct PackageHeader: Equatable, Sendable {
 }
 
 public enum InstallError: Error, Equatable {
-    case busy, noFreeSlot, notAPackage
+    case busy, notAPackage
+    /// Every one of the watch's `slots` app slots holds another app.
+    case noFreeSlot(slots: Int)
     case refused(UInt8)
 }
 
@@ -50,8 +61,8 @@ func check(_ r: Data) throws -> Data {
     return Data(r.dropFirst())
 }
 
-/// Headers of the occupied slots (0…7 and the loader).
-public func installed(_ s: Requester) async throws -> [Int: PackageHeader] {
+/// Headers of the occupied slots (0…slots−1 and the loader).
+public func installed(_ s: Requester, slots: Int) async throws -> [Int: PackageHeader] {
     var out: [Int: PackageHeader] = [:]
     for slot in Array(0..<slots) + [loaderSlot] {
         if let h = parseHeader(try check(try await s.call(Cmd.info, Data([UInt8(slot)])))) { out[slot] = h }
@@ -67,9 +78,10 @@ public func install(_ s: Requester, package: Data, progress: @Sendable (Double) 
     if pkg.kind == 1 {
         slot = loaderSlot
     } else {
-        let used = try await installed(s)
+        let slots = appSlots(stub: try await stubVersion(s))
+        let used = try await installed(s, slots: slots)
         guard let free = used.first(where: { $0.key < slots && $0.value.name == pkg.name })?.key
-            ?? (0..<slots).first(where: { used[$0] == nil }) else { throw InstallError.noFreeSlot }
+            ?? (0..<slots).first(where: { used[$0] == nil }) else { throw InstallError.noFreeSlot(slots: slots) }
         slot = free
     }
     var begin = Data([UInt8(slot)])

@@ -3,8 +3,17 @@ package tools.fmc.companion.wire
 // Installing an app package from the phone over K (src/wp2apps/install.py): INFO, BEGIN, DATA…, END.
 // Port of ios/WireKit Install.swift.
 
-const val SLOTS = 8
 const val LOADER_SLOT = 0xFF
+
+/**
+ * App slots on the watch, 0..n-1: 8 before stub 7, 16 from stub 7.
+ * TODO(app-order): stub 7 and its 16 slots come from the cmf-watch-sdk branch app-order (docs/app-order.md and the
+ * stub's docs there, not written yet); check this against them when they are.
+ */
+fun appSlots(stub: Long): Int = if (stub >= 7) 16 else 8
+
+/** The stub's release from INFO on 0xFE; 1 when the reply doesn't say. */
+suspend fun stubVersion(s: Requester): Long = parseStubReply(s.call(Cmd.INFO, bytes(STUB_SLOT)))?.version ?: 1
 private const val HEADER_SIZE = 64
 private const val DATA_MAX = 128
 
@@ -13,7 +22,8 @@ data class PackageHeader(val kind: Int, val name: String, val version: Long, val
 
 sealed class InstallError(message: String) : Exception(message) {
     data object Busy : InstallError("the app is running on the watch")
-    data object NoFreeSlot : InstallError("no free slot on the watch")
+    /** Every one of the watch's [slots] app slots holds another app. */
+    data class NoFreeSlot(val slots: Int) : InstallError("all $slots app slots on the watch are taken")
     data object NotAPackage : InstallError("not an app package")
     data class Refused(val status: Int) : InstallError("refused (%02X)".format(status))
 }
@@ -33,10 +43,10 @@ private fun check(r: ByteArray): ByteArray {
     return r.copyOfRange(1, r.size)
 }
 
-/** Headers of the occupied slots (0…7 and the loader). */
-suspend fun installed(s: Requester): Map<Int, PackageHeader> {
+/** Headers of the occupied slots (0 until [slots] and the loader). */
+suspend fun installed(s: Requester, slots: Int): Map<Int, PackageHeader> {
     val out = sortedMapOf<Int, PackageHeader>()
-    for (slot in (0 until SLOTS) + LOADER_SLOT) {
+    for (slot in (0 until slots) + LOADER_SLOT) {
         parseHeader(check(s.call(Cmd.INFO, bytes(slot))))?.let { out[slot] = it }
     }
     return out
@@ -49,10 +59,11 @@ suspend fun installed(s: Requester): Map<Int, PackageHeader> {
 suspend fun install(s: Requester, pkg: ByteArray, progress: (Double) -> Unit): Int {
     val header = parseHeader(pkg)?.takeIf { it.kind == 0 || it.kind == 1 } ?: throw InstallError.NotAPackage
     val slot = if (header.kind == 1) LOADER_SLOT else {
-        val used = installed(s)
-        used.entries.firstOrNull { it.key < SLOTS && it.value.name == header.name }?.key
-            ?: (0 until SLOTS).firstOrNull { it !in used }
-            ?: throw InstallError.NoFreeSlot
+        val slots = appSlots(stubVersion(s))
+        val used = installed(s, slots)
+        used.entries.firstOrNull { it.key < slots && it.value.name == header.name }?.key
+            ?: (0 until slots).firstOrNull { it !in used }
+            ?: throw InstallError.NoFreeSlot(slots)
     }
     check(s.call(Cmd.BEGIN, buf { u8(slot); le32(pkg.size.toLong()); le32(crc32(pkg)) }))
     for (off in pkg.indices step DATA_MAX) {

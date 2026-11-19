@@ -51,6 +51,37 @@ struct WatchApp: Identifiable {
     }
 }
 
+/// The order of the apps on the watch, as package names, kept on the phone per watch; the Installed list shows it.
+@MainActor @Observable final class AppOrder {
+    static let shared = AppOrder()
+    private static let key = "app-order"
+    /// The last watch read (its BLE identifier); the order is kept per watch.
+    var watch: String? = UserDefaults.standard.string(forKey: "watch") {
+        didSet { UserDefaults.standard.set(watch, forKey: "watch") }
+    }
+    private var byWatch: [String: [String]] = UserDefaults.standard.dictionary(forKey: key) as? [String: [String]] ?? [:]
+
+    /// The saved order first, then the apps it doesn't name, by slot.
+    func sorted(_ apps: [WatchApp]) -> [WatchApp] {
+        let names = byWatch[watch ?? ""] ?? []
+        return apps.enumerated().sorted {
+            (names.firstIndex(of: $0.element.name) ?? .max, $0.offset) < (names.firstIndex(of: $1.element.name) ?? .max, $1.offset)
+        }.map(\.element)
+    }
+
+    func set(_ names: [String]) {
+        byWatch[watch ?? ""] = names
+        UserDefaults.standard.set(byWatch, forKey: Self.key)
+        Task { await Self.send(names) }
+    }
+
+    /// TODO(app-order): send the order to the watch over K (FirmwareModel.k, like remove) once cmf-watch-sdk
+    /// docs/app-order.md (branch app-order) says the command and bytes. Until then it stays on the phone.
+    static func send(_ names: [String]) async {
+        DevLog.shared.log("app order saved on the phone (\(names.count) apps); the watch doesn't take it yet")
+    }
+}
+
 /// The coloured rounded square of an iOS Settings row.
 struct SettingsIcon: View {
     let symbol: String
@@ -243,8 +274,8 @@ struct AppsTab: View {
             await watch.check()
         } catch InstallError.busy {
             error = String(localized: "\(listing.name) or the Apps menu is open on the watch. Go back to the watch face, then try again.")
-        } catch InstallError.noFreeSlot {
-            error = String(localized: "All 8 app slots on the watch are taken.")
+        } catch InstallError.noFreeSlot(let slots) {
+            error = String(localized: "All \(slots) app slots on the watch are taken.")
         } catch {
             self.error = String(localized: "Couldn't install \(listing.name): \(error.localizedDescription)")
         }
@@ -300,6 +331,7 @@ struct AppsView: View {
     @Environment(WatchModel.self) private var watch
     private var perms = Permissions.shared
     @State private var showAll = false
+    @State private var editMode = EditMode.inactive
 
     var body: some View {
         // Installed is the watch's list: nothing until it is read, not the apps that only asked for something
@@ -350,6 +382,9 @@ struct AppsView: View {
             }
         }
         .navigationTitle("Apps")
+        .toolbar { if !showAll, !apps.isEmpty { EditButton() } }
+        .environment(\.editMode, $editMode)
+        .onChange(of: showAll) { editMode = .inactive }
         .task { await StoreApps.shared.load() }
         // the list of installed apps is the watch's: read it here too, not only from Connect on the Watch tab
         .task { if watch.phase == .idle { await watch.check() } }
@@ -361,9 +396,21 @@ struct AppsView: View {
     }
 
     @ViewBuilder private func installed(_ apps: [WatchApp]) -> some View {
-        let on = apps.filter { $0.slot != nil }
+        let on = AppOrder.shared.sorted(apps.filter { $0.slot != nil })
         let updates = on.filter { $0.update != nil }, current = on.filter { $0.update == nil }
-        if !updates.isEmpty {
+        if editMode.isEditing {
+            // one list while editing: the order is of every app on the watch
+            Section {
+                ForEach(on) { row($0) }
+                    .onMove { from, to in
+                        var names = on.map(\.name)
+                        names.move(fromOffsets: from, toOffset: to)
+                        AppOrder.shared.set(names)
+                    }
+            } footer: {
+                Text("Drag to set the order of the apps on the watch.")
+            }
+        } else if !updates.isEmpty {
             Section {
                 ForEach(updates) { row($0) }
             } header: {
@@ -372,7 +419,7 @@ struct AppsView: View {
                 Text("Updates install over Bluetooth. Keep the app closed on the watch meanwhile.")
             }
         }
-        if !current.isEmpty {
+        if !editMode.isEditing, !current.isEmpty {
             Section("On the watch") { ForEach(current) { row($0) } }
         }
     }

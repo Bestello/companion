@@ -34,6 +34,7 @@ suspend fun readWatch(context: Context, store: SecureStore): LoaderState? {
     try {
         return withTimeout(30_000) {
             link.connect()
+            AppOrder.watch(context, link.watchId)
             val account = "k-${link.watchId}"
             val cached = store[account]
             val (session, secret) = KSession.open(link, cached, register = false)

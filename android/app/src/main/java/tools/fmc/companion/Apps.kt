@@ -35,6 +35,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.AlertDialog
@@ -232,6 +234,31 @@ fun NavRow(title: String, detail: String? = null, count: Int = 0, onClick: () ->
         Text("›", color = Fmc.secondary)
     }
 
+/** The order of the apps on the watch, as package names, kept on the phone per watch (prefs "app": "watch" the last
+ *  one read, "order|<watch>" its names); the Installed list shows it. */
+object AppOrder {
+    private fun prefs(context: Context) = context.getSharedPreferences("app", 0)
+    fun watch(context: Context, id: String?) = prefs(context).edit().putString("watch", id).apply()
+
+    fun of(context: Context): List<String> = prefs(context).let { p ->
+        p.getString("order|${p.getString("watch", "")}", null)?.split("\n")?.filter { it.isNotEmpty() } ?: emptyList()
+    }
+
+    /** The saved order first, then the apps it doesn't name, as they came (by slot). */
+    fun sorted(apps: List<WatchApp>, names: List<String>) =
+        apps.sortedBy { a -> names.indexOf(a.name).let { if (it < 0) Int.MAX_VALUE else it } }
+
+    suspend fun set(context: Context, names: List<String>) {
+        prefs(context).let { p -> p.edit().putString("order|${p.getString("watch", "")}", names.joinToString("\n")).apply() }
+        send(context, names)
+    }
+
+    /** TODO(app-order): send the order to the watch over K (kRun, like remove) once cmf-watch-sdk docs/app-order.md
+     *  (branch app-order) says the command and bytes. Until then it stays on the phone. */
+    private fun send(context: Context, names: List<String>) =
+        DevLog.log(context, "app order saved on the phone (${names.size} apps); the watch doesn't take it yet")
+}
+
 @Composable
 fun AppsScreen(model: AppModel, open: (String) -> Unit) {
     val context = LocalContext.current
@@ -245,23 +272,28 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit) {
         if (bt && model.phase == Phase.Idle) model.check()
     }
     var showAll by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
+    var order by remember { mutableStateOf(AppOrder.of(context)) }
+    val scope = rememberCoroutineScope()
     // Installed is the watch's list: nothing until it is read, not the apps that only asked for something
     val loader = model.listedLoader
     val apps = if (showAll) WatchApp.store(loader, grants) else if (loader == null) emptyList() else WatchApp.all(loader, grants).filter { it.slot != null }
     // first load: placeholder rows; a refresh keeps the rows it has
     val loading = apps.isEmpty() && if (showAll) !StoreApps.loaded else model.isChecking
+    val on = AppOrder.sorted(apps.filter { it.slot != null }, order)
     Column {
-        Bar("Apps")
+        Bar("Apps") {
+            if (!showAll && on.isNotEmpty()) TextButton({ editing = !editing }) { Text(if (editing) "Done" else "Edit") }
+        }
         LazyColumn {
             item {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                     listOf("Installed", "All").forEachIndexed { i, label ->
-                        SegmentedButton(showAll == (i == 1), { showAll = i == 1 },
+                        SegmentedButton(showAll == (i == 1), { showAll = i == 1; editing = false },
                             SegmentedButtonDefaults.itemShape(i, 2)) { Text(label) }
                     }
                 }
             }
-            val on = apps.filter { it.slot != null }
             fun group(title: String, list: List<WatchApp>, footer: String? = null) = item(title) {
                 Section(title, footer) {
                     list.forEachIndexed { i, app ->
@@ -276,8 +308,30 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit) {
             val (updates, current) = on.partition { it.update != null }
             if (showAll) { if (apps.isNotEmpty()) group("FMC store", apps, if (model.listedLoader == null) "Connect on the Watch tab to install apps." else null) }
             else {
-                if (updates.isNotEmpty()) group("Updates", updates, "Updates install over Bluetooth. Keep the app closed on the watch meanwhile.")
-                if (current.isNotEmpty()) group("On the watch", current)
+                // one list while editing: the order is of every app on the watch
+                if (editing) item("order") {
+                    Section("On the watch", "Set the order of the apps on the watch.") {
+                        on.forEachIndexed { i, app ->
+                            if (i > 0) HorizontalDivider()
+                            fun move(to: Int) {
+                                val names = on.map { it.name }.toMutableList().apply { add(to, removeAt(i)) }
+                                order = names
+                                scope.launch { AppOrder.set(context, names) }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                AppIcon(app.name)
+                                Text(app.title, Modifier.weight(1f))
+                                IconButton({ move(i - 1) }, enabled = i > 0) {
+                                    Icon(Icons.Default.KeyboardArrowUp, "Move ${app.title} up")
+                                }
+                                IconButton({ move(i + 1) }, enabled = i < on.size - 1) {
+                                    Icon(Icons.Default.KeyboardArrowDown, "Move ${app.title} down")
+                                }
+                            }
+                        }
+                    }
+                } else if (updates.isNotEmpty()) group("Updates", updates, "Updates install over Bluetooth. Keep the app closed on the watch meanwhile.")
+                if (!editing && current.isNotEmpty()) group("On the watch", current)
             }
             if (loading) item {
                 Section {
@@ -539,8 +593,8 @@ object AppUpdates {
             throw e
         } catch (_: tools.fmc.companion.wire.InstallError.Busy) {
             error = "${listing.name} or the Apps menu is open on the watch. Go back to the watch face, then try again."
-        } catch (_: tools.fmc.companion.wire.InstallError.NoFreeSlot) {
-            error = "All 8 app slots on the watch are taken."
+        } catch (e: tools.fmc.companion.wire.InstallError.NoFreeSlot) {
+            error = "All ${e.slots} app slots on the watch are taken."
         } catch (e: Exception) {
             error = "Couldn't install ${listing.name}: ${e.message}"
         } finally {

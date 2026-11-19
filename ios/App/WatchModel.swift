@@ -51,6 +51,7 @@ import WireKit
         }
         defer { watchdog.cancel() }
         try await link.connect()
+        AppOrder.shared.watch = link.watchID?.uuidString
         return try await KLock.shared.run { try await Self.open(link) }.1
     }
 

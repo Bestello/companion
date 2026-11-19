@@ -22,6 +22,8 @@ public struct LoaderState: Equatable, Sendable {
     public var loader: PackageHeader?
     /// slot → app
     public var apps: [Int: PackageHeader]
+    /// How many app slots this stub has.
+    public var slots: Int { appSlots(stub: stub.version) }
 
     public init(stub: Stub, loader: PackageHeader?, apps: [Int: PackageHeader]) {
         (self.stub, self.loader, self.apps) = (stub, loader, apps)
@@ -51,6 +53,6 @@ public func readLoader(_ s: Requester, probe: Duration = .milliseconds(2500)) as
         return r.first == Status.ok.rawValue ? parseHeader(Data(r.dropFirst())) : nil
     }
     var apps: [Int: PackageHeader] = [:]
-    for slot in 0..<slots { apps[slot] = try await read(slot) }
+    for slot in 0..<appSlots(stub: stub.version) { apps[slot] = try await read(slot) }
     return LoaderState(stub: stub, loader: try await read(loaderSlot), apps: apps)
 }
