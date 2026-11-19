@@ -13,7 +13,11 @@ struct FMCCompanionApp: App {
     /// The catalog's navigation: face ids. A link to a face replaces it.
     @State private var path: [String] = []
 
-    init() { Analytics.start() }
+    init() {
+        Analytics.start()
+        // the catalog's pictures: fmc.tools sends them with max-age 30 days, so one seen is read from disk after
+        URLCache.shared = URLCache(memoryCapacity: 50 << 20, diskCapacity: 300 << 20)
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -235,6 +239,7 @@ struct WatchStatus: View {
 
 /// The watch's faces as last read: by the button (stock session, Nothing X closed) or by an install.
 struct FacesOnWatchSection: View {
+    @Environment(Account.self) private var account
     @Environment(Catalog.self) private var catalog
     @Environment(WatchModel.self) private var watch
     @State private var faces: [DialSlot] = []
@@ -293,7 +298,7 @@ struct FacesOnWatchSection: View {
             if let count, count.count == 2 { Text("Watch faces · \(count[0]) of \(count[1])") } else { Text("Watch faces") }
         }
         // the catalog loads with the Watch faces tab; this one can come first
-        .task { if catalog.all.isEmpty { await catalog.load() } }
+        .task(id: faces.map(\.id)) { await catalog.resolve(faces.map(\.id), account: account) }
         .onAppear(perform: load)
         // right after each connect, with the saved key only: a bind takes the watch from Nothing X
         .task(id: watch.phase) { if case .checked = watch.phase { await read(bind: false) } }
@@ -378,7 +383,7 @@ struct DialPicture: View {
     let slot: DialSlot
 
     var body: some View {
-        if let url = slot.face(in: catalog)?.previewURL ?? slot.savedPreview {
+        if let url = slot.face(in: catalog)?.thumbURL ?? slot.savedPreview {
             FacePreview(url: url)
         } else {
             // no picture anywhere for stock and Nothing X faces: the watch's place for it
