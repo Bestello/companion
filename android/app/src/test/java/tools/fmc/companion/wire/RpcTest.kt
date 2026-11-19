@@ -163,7 +163,7 @@ class RpcTest {
         assertEquals(RpcStatus.BAD_REQUEST, status(answer("a", hex("5231510110"), p)), "calendar without args")
         assertNull(answer("a", hex("5231500100"), p))
         p.grants["http:example.com"] = true
-        assertEquals("52314107000001104041606162", answer("a", hex("5231510701"), p)!!.single().hex(), "caps")
+        assertEquals("5231410700000110404160616270", answer("a", hex("5231510701"), p)!!.single().hex(), "caps")
         p.slow = true
         val t0 = System.currentTimeMillis()
         assertEquals(RpcStatus.UNAVAILABLE, status(answer("a", cal, p, budgetMs = 300)))
@@ -222,6 +222,16 @@ class RpcTest {
         answer("app", "R1Q".toByteArray() + byteArrayOf(9, 0x62) + "score".toByteArray(), p)
         assertNull(p.state.storage.get("app", "score"))
         assertEquals(RpcStatus.BAD_REQUEST, status(get("app", "a/b")))
+        assertEquals(emptyList(), p.asked, "no cap")
+    }
+
+    @Test fun battery() = runBlocking {
+        each("battery") { t ->
+            val i = t.getJSONObject("in")
+            assertEquals(t.getString("hex"), batteryRecord(i.getInt("level"), i.getBoolean("charging")).hex())
+        }
+        val p = FakePhone()
+        assertEquals("5231410900000170", answer("a", hex("5231510970"), p)!!.single().hex(), "the fake answers its method id")
         assertEquals(emptyList(), p.asked, "no cap")
     }
 

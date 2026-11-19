@@ -148,6 +148,13 @@ import WireKit
 
     func notifications(limit: Int) async throws -> [PhoneNotification] { throw RPCStatus.unavailable }
 
+    func battery() async throws -> (level: Int, charging: Bool) {
+        let d = UIDevice.current
+        d.isBatteryMonitoringEnabled = true
+        guard d.batteryLevel >= 0 else { throw RPCStatus.unavailable } // the simulator, or unknown
+        return (Int((d.batteryLevel * 100).rounded()), d.batteryState == .charging || d.batteryState == .full)
+    }
+
     private static let http: URLSession = {
         let c = URLSessionConfiguration.ephemeral
         c.httpCookieStorage = nil

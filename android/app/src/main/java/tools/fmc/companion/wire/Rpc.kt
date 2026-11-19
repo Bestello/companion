@@ -26,6 +26,10 @@ object Method {
     const val STORAGE_GET = 0x60
     const val STORAGE_PUT = 0x61
     const val STORAGE_DELETE = 0x62
+    const val BATTERY = 0x70
+
+    /** No cap: in `caps` always, after the others. */
+    val FREE = listOf(STORAGE_GET, STORAGE_PUT, STORAGE_DELETE, BATTERY)
 
     /** Methods whose request comes in parts (`index ‖ total ‖ chunk`). */
     val MULTI_PART = setOf(HTTP_REQUEST, STORAGE_PUT)
@@ -122,6 +126,9 @@ fun httpRecords(code: Int, body: ByteArray): List<ByteArray> {
     return listOf(buf { le16(code); le16(body.size) }) + chunks
 }
 
+/** `level:u8 ‖ flags:u8`, level 0..100, flags bit 0 plugged in. */
+fun batteryRecord(level: Int, charging: Boolean): ByteArray = bytes(level.coerceIn(0, 100), if (charging) 1 else 0)
+
 fun notificationRecord(ageMin: Long, app: String, text: String, show: Boolean): ByteArray {
     val label = utf8Cut(app, 24)
     return buf {
@@ -203,6 +210,7 @@ fun capOf(method: Int, args: ByteArray): String? = when (method) {
     Method.HTTP -> httpHost(args)?.let { "http:$it" }
     Method.HTTP_REQUEST -> parseHttpCall(args)?.let { "http:${it.host}" }
     Method.NOTIFICATIONS -> "notifications".takeIf { args.size == 1 }
+    Method.BATTERY -> "" // no cap
     else -> null
 }
 
@@ -234,8 +242,7 @@ suspend fun answer(pkg: String, msg: ByteArray, phone: Phone, budgetMs: Long = 7
         val fixed = listOf(Method.CALENDAR to "calendar", Method.LOCATION to "location", Method.WEATHER to "weather",
             Method.NOTIFICATIONS to "notifications").filter { ok(it.second) }.map { it.first }
         val http = if (grants.any { it.key.startsWith("http:") && it.value }) listOf(Method.HTTP, Method.HTTP_REQUEST) else emptyList()
-        val free = listOf(Method.STORAGE_GET, Method.STORAGE_PUT, Method.STORAGE_DELETE)
-        return replies(r.id, RpcStatus.OK, listOf(((fixed + http).sorted() + free).map { it.toByte() }.toByteArray()))
+        return replies(r.id, RpcStatus.OK, listOf(((fixed + http).sorted() + Method.FREE).map { it.toByte() }.toByteArray()))
     }
     // multi-part: no reply before the last part, then the joined payload stands for the args
     val args = if (method !in Method.MULTI_PART) r.args else try {
@@ -250,7 +257,7 @@ suspend fun answer(pkg: String, msg: ByteArray, phone: Phone, budgetMs: Long = 7
         replies(r.id, e.status)
     }
     val cap = capOf(method, args) ?: return replies(r.id, RpcStatus.BAD_REQUEST)
-    when (grants[cap]) {
+    if (cap.isNotEmpty()) when (grants[cap]) {
         null -> { phone.ask(pkg, cap, method == Method.HTTP_REQUEST); return replies(r.id, RpcStatus.ASK) }
         false -> return replies(r.id, RpcStatus.DENIED)
         true -> if (!phone.osAllows(cap)) return replies(r.id, RpcStatus.DENIED)

@@ -55,6 +55,8 @@ struct RPCVectors: Decodable {
     let http: [Http]
     let http_request: [HttpReq]
     let storage: Storage
+    struct Battery: Decodable { struct In: Decodable { let level: Int; let charging: Bool }; let `in`: In; let hex: String }
+    let battery: [Battery]
     let notifications: [Notif]
     let replies: [Reply]
 
@@ -225,6 +227,7 @@ private let rv = RPCVectors.shared
         return (200, Data("ok".utf8))
     }
     func notifications(limit: Int) async throws -> [PhoneNotification] { [] }
+    func battery() async throws -> (level: Int, charging: Bool) { (57, true) }
 }
 
 private func call(_ method: UInt8, _ args: [UInt8] = [], id: UInt8 = 1) -> Data {
@@ -321,7 +324,14 @@ private func ask(_ host: FakeHost, _ m: Data, package: String? = "weather.app",
 }
 
 /// Methods every package may call, at the end of `caps`.
-let storageIDs = Data([RPCMethod.storageGet, RPCMethod.storagePut, RPCMethod.storageDelete])
+let storageIDs = Data(RPCMethod.free)
+
+@Test @MainActor func rpcBattery() async {
+    for b in rv.battery { #expect(batteryRecord(level: b.in.level, charging: b.in.charging) == hex(b.hex)) }
+    let h = FakeHost()
+    #expect(await ask(h, call(RPCMethod.battery))?.1 == [Data([57, 1])])
+    #expect(h.asked.isEmpty, "no cap")
+}
 
 @Test @MainActor func rpcStorageVectors() async throws {
     let st = rv.storage

@@ -12,6 +12,9 @@ public enum RPCMethod {
     public static let caps: UInt8 = 0x01, calendar: UInt8 = 0x10, location: UInt8 = 0x20, weather: UInt8 = 0x30
     public static let http: UInt8 = 0x40, httpRequest: UInt8 = 0x41, notifications: UInt8 = 0x50
     public static let storageGet: UInt8 = 0x60, storagePut: UInt8 = 0x61, storageDelete: UInt8 = 0x62
+    public static let battery: UInt8 = 0x70
+    /// No cap: in `caps` always, after the others.
+    public static let free: [UInt8] = [storageGet, storagePut, storageDelete, battery]
     /// Methods whose request comes in parts (`index ‖ total ‖ chunk`).
     public static let multiPart: Set<UInt8> = [httpRequest, storagePut]
 }
@@ -240,6 +243,9 @@ public func requestHeaders(_ user: [HTTPHeader], body: Data) -> [HTTPHeader] {
     }
 }
 
+/// `level:u8 ‖ flags:u8`, level 0…100, flags bit 0 plugged in.
+public func batteryRecord(level: Int, charging: Bool) -> Data { Data([UInt8(min(max(level, 0), 100)), charging ? 1 : 0]) }
+
 public struct PhoneNotification: Equatable, Sendable {
     public var ageMin: Int, app: String, text: String
     public init(ageMin: Int, app: String, text: String) { (self.ageMin, self.app, self.text) = (ageMin, app, text) }
@@ -278,6 +284,8 @@ public func notificationRecord(_ n: PhoneNotification, show: Bool) -> Data {
     /// Parts, stores: one per phone.
     var state: RPCState { get }
     func notifications(limit: Int) async throws -> [PhoneNotification]
+    /// 0…100 and plugged in (charging or full); UNAVAILABLE when the phone doesn't say.
+    func battery() async throws -> (level: Int, charging: Bool)
 }
 
 /// The reply messages to one message from the app in `package`'s slot; nil when it is not a request.
@@ -326,7 +334,7 @@ public func answer(_ message: Data, package: String?, host: any RPCHost,
         if on("weather") { ids.append(RPCMethod.weather) }
         if g.contains(where: { $0.key.hasPrefix("http:") && $0.value }) { ids += [RPCMethod.http, RPCMethod.httpRequest] }
         if host.notificationsAvailable, on("notifications") { ids.append(RPCMethod.notifications) }
-        ids += [RPCMethod.storageGet, RPCMethod.storagePut, RPCMethod.storageDelete]
+        ids += RPCMethod.free
         return ids.isEmpty ? [] : [Data(ids)]
     case RPCMethod.calendar:
         guard a.count >= 3 else { throw RPCStatus.badRequest }
@@ -369,6 +377,9 @@ public func answer(_ message: Data, package: String?, host: any RPCHost,
     case RPCMethod.storageDelete:
         host.state.storage.delete(package, try storageKey(args))
         return []
+    case RPCMethod.battery:
+        let b = try await host.battery()
+        return [batteryRecord(level: b.level, charging: b.charging)]
     case RPCMethod.notifications:
         guard host.notificationsAvailable else { throw RPCStatus.unavailable }
         guard let limit = a.first else { throw RPCStatus.badRequest }

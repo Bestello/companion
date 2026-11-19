@@ -40,7 +40,7 @@ Capabilities:
 
 | Cap | Methods | OS permission |
 |---|---|---|
-| (none) | `caps`, `storage.*` | — |
+| (none) | `caps`, `storage.*`, `phone.battery` | — |
 | `calendar` | `calendar.events` | EventKit full access (iOS 17+ `requestFullAccessToEvents`); `READ_CALENDAR` |
 | `location` | `location` | When In Use, reduced accuracy is enough; `ACCESS_COARSE_LOCATION` |
 | `weather` | `weather` | the same as `location` (the phone needs it; the watch gets no position) |
@@ -126,11 +126,12 @@ Characters the watch has no glyph for stay as they are (they draw as `?`).
 | `0x60` | `storage.get` | — |
 | `0x61` | `storage.put` | — |
 | `0x62` | `storage.delete` | — |
+| `0x70` | `phone.battery` | — |
 
 ### `0x01 caps`
 
 Args: none. One record: the method ids this package may call now (granted and OS permission on), one byte each,
-without `0x01` itself; `0x40` and `0x41` when any host is granted; the methods without a cap (`0x60`–`0x62`) always,
+without `0x01` itself; `0x40` and `0x41` when any host is granted; the methods without a cap (`0x60`–`0x62`, `0x70`) always,
 after the others.
 A miniapp calls it at start to tell "allow on your phone" from an empty result.
 
@@ -242,6 +243,17 @@ vectors).
 Quota: 64 KiB per package, keys and values counted together; a put that would go over it is `TOO_LARGE` and keeps
 the old value. Kept in the app's own files, out of backups (iOS Application Support excluded from backup, Android
 `noBackupFilesDir`), one file per key. Delete from the Watch clears the package's store; Reset permissions doesn't.
+
+### `0x70 phone.battery`
+
+Args: none. No cap. One record (`battery` vectors):
+
+```
+level:u8 ‖ flags:u8
+```
+
+`level` 0–100 %, `flags` bit 0 plugged in (charging or full). The phone doesn't know its level (the iOS simulator):
+`UNAVAILABLE`.
 
 ### `0x50 notifications`
 

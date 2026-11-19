@@ -507,5 +507,35 @@
    }
   ],
   "quota": 65536
- }
+ },
+ "battery": [
+  {
+   "in": {
+    "level": 57,
+    "charging": true
+   },
+   "hex": "3901"
+  },
+  {
+   "in": {
+    "level": 100,
+    "charging": false
+   },
+   "hex": "6400"
+  },
+  {
+   "in": {
+    "level": 0,
+    "charging": true
+   },
+   "hex": "0001"
+  },
+  {
+   "in": {
+    "level": 130,
+    "charging": false
+   },
+   "hex": "6400"
+  }
+ ]
 }
