@@ -73,6 +73,7 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.markdown.m3)
     implementation(libs.aptabase)
+    implementation(libs.okhttp)
 
     testImplementation(libs.junit)
     testImplementation(kotlin("test"))

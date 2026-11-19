@@ -44,13 +44,14 @@ Capabilities:
 | `calendar` | `calendar.events` | EventKit full access (iOS 17+ `requestFullAccessToEvents`); `READ_CALENDAR` |
 | `location` | `location` | When In Use, reduced accuracy is enough; `ACCESS_COARSE_LOCATION` |
 | `weather` | `weather` | the same as `location` (the phone needs it; the watch gets no position) |
-| `http:<host>` | `http.get` to that host | — |
+| `http:<host>` | `http.get` and `http.request` to that host | — |
 | `notifications` | `notifications` | Android: notification listener access. iOS: none possible, the method answers `UNAVAILABLE` |
 
 Flow:
 
 1. A method whose cap this package has no answer for yet: reply `ASK`. The phone keeps a pending request
-   (package, cap) and posts a local notification "‹package› wants ‹cap›", at most once a day per pair.
+   (package, cap) and posts a local notification "‹package› wants ‹cap›" ("‹package› wants to read and change data
+   on ‹host›" for `http.request`), at most once a day per pair.
 2. The companion's Permissions screen (opened from that notification or from Settings) lists pending requests and
    every package's grants. Allow asks for the OS permission the cap needs, if it is not given yet; Deny is kept too.
 3. Later calls: granted and OS permission on → the method runs; denied, or the OS permission is off → `DENIED`, and no
@@ -83,7 +84,8 @@ Reply (phone → watch):
 - A result of `total` records goes as `total` messages, `index` 0…total−1, one record each (≤ 121 bytes), sent with
   `KSession.send` (it retries `FULL`/`PAUSED`), so the app drains `recv` in its loop.
 - Empty result or any error: one message, `index` 0, `total` 0, no record.
-- The phone handles one request at a time, in order of arrival, and keeps no state per request.
+- The phone handles one request at a time, in order of arrival, and keeps no state per request, except the parts of
+  an `http.request` not joined yet (one per package).
 - No answer at all (phone asleep, out of range, companion not running): the app shows its cached copy (`store`,
   4 KiB) and asks again after 3 s, then less often.
 
@@ -94,7 +96,7 @@ Reply (phone → watch):
 | 2 `DENIED` | the user denied the cap, or its OS permission is off |
 | 3 `UNAVAILABLE` | the phone cannot answer now: no location fix, network down or timeout, iOS notifications |
 | 4 `ASK` | the user has not answered yet; the phone asked. Show "Allow on your phone" |
-| 5 `TOO_LARGE` | `http.get` body over 2048 bytes |
+| 5 `TOO_LARGE` | `http.get` / `http.request` body over 2048 bytes |
 
 Text fields are UTF-8, cut by the phone to at most the stated size, at a character boundary (`utf8_cut` vectors:
 64 Cyrillic-only bytes stay 64).
@@ -109,12 +111,13 @@ Characters the watch has no glyph for stay as they are (they draw as `?`).
 | `0x20` | `location` | `location` |
 | `0x30` | `weather` | `weather` |
 | `0x40` | `http.get` | `http:<host>` |
+| `0x41` | `http.request` | `http:<host>` |
 | `0x50` | `notifications` | `notifications` |
 
 ### `0x01 caps`
 
 Args: none. One record: the method ids this package may call now (granted and OS permission on), one byte each,
-without `0x01` itself; `0x40` when any host is granted.
+without `0x01` itself; `0x40` and `0x41` when any host is granted.
 A miniapp calls it at start to tell "allow on your phone" from an empty result.
 
 ### `0x10 calendar.events`
@@ -167,8 +170,9 @@ for 30 min and fetches with a 6 s timeout; nothing cached and no network: `UNAVA
 
 ### `0x40 http.get`
 
-Args: the URL, UTF-8, `https://` only, ≤ 123 bytes. Cap `http:<host>` for the URL's host. GET without cookies, with
-`User-Agent: FMC-Companion`, 6 s timeout, redirects only within the same host. Records (`http` vectors):
+Args: the URL, UTF-8, `https://` only, ≤ 123 bytes. Cap `http:<host>` for the URL's host. GET with
+`User-Agent: FMC-Companion`, the headers and cookies of (package, host) (see "Headers and cookies" under
+`http.request`), 6 s timeout, redirects only within the same host. Records (`http` vectors):
 
 ```
 first: code:u16 ‖ length:u16
@@ -177,6 +181,49 @@ then:  the body in chunks of 121 bytes
 
 Any HTTP code is `OK` with that code; a body over 2048 bytes is `TOO_LARGE`; no answer in time or no network:
 `UNAVAILABLE`. The app's own server should answer compactly: the watch has 4 KiB of storage.
+
+### `0x41 http.request`
+
+Any method, with a body, for an app that changes data on its server. The request is too big for one message, so it
+comes in parts: one or more `R1Q` with the same `id` and method `0x41`, args
+
+```
+index:u8 ‖ total:u8 ‖ chunk
+```
+
+`chunk` ≤ 121 bytes, `total` 1–9, `index` 0…total−1 in order. The phone joins the chunks of one id per package and
+answers only after the last part; parts before it get no reply. `BAD_REQUEST` (and the joined bytes so far are
+dropped) for: a part out of order (the first one not `index` 0, a gap, a repeat, a `total` that changes), a part with
+a new `id` before the last part of the open one (the new part is refused; the app sends its request again from
+`index` 0), `total` 0 or over 9. Other methods in between don't touch the open request.
+
+The joined payload (`http_request` vectors):
+
+```
+method:u8 ‖ url_len:u8 ‖ url ‖ body
+```
+
+`method` 0 GET, 1 POST, 2 PUT, 3 PATCH, 4 DELETE. `url` UTF-8, `https://` only. `body` is the rest, up to
+9 × 121 − 2 − url_len bytes; GET takes none. Anything else (method 5+, `url_len` past the end, not https, GET with
+a body) is `BAD_REQUEST`. Cap: the same `http:<host>` as `http.get`; the ask says the app wants to read and change
+data on that host.
+
+The reply is `http.get`'s: `code:u16 ‖ length:u16`, then the body in 121-byte chunks; a body over 2048 bytes is
+`TOO_LARGE`; no answer in 6 s or no network: `UNAVAILABLE`. Redirects only within the same host; 301–303 turn into a
+GET without the body, as browsers do.
+
+#### Headers and cookies
+
+Kept on the phone per (package, host) and put on `http.get` and `http.request` to that host. They never go to the
+watch, and the phone never logs them.
+
+- **Headers.** The user types name/value pairs (`Authorization: Bearer …`) on the app's page, under its
+  `http:<host>` row, "Headers". iOS keeps them in the Keychain, Android in SecureStore (AES-GCM under a Keystore
+  key). `User-Agent: FMC-Companion` unless the user sets their own. `Content-Type: application/json` when the body
+  starts with `{` or `[` and the user set no `Content-Type`.
+- **Cookies.** A jar per (package, host): what the host sets comes back on the next request. In memory, so a login
+  by cookie lasts while the companion runs. On iOS, cookies set on a redirect's own response are not kept.
+- Reset permissions and Delete from the Watch clear both.
 
 ### `0x50 notifications`
 

@@ -54,20 +54,24 @@ import WireKit
 
     func pendingCount(_ package: String) -> Int { caps(package).filter { isPending(package, $0) }.count }
 
-    /// Forgets every answer: the next calls ask again.
+    /// Forgets every answer, the headers and the cookies: the next calls ask again.
     func reset(_ package: String) {
+        for cap in caps(package) where cap.hasPrefix("http:") { setHeaders(package, String(cap.dropFirst(5)), []) }
+        PhoneServices.shared.clearCookies(package)
         store.grants[package] = nil
         store.asked[package] = nil
         store.showText.remove(package)
         save()
     }
 
-    func ask(_ package: String, _ cap: String, now: Date = .now) {
+    /// `write`: http.request, which can change data on the host.
+    func ask(_ package: String, _ cap: String, write: Bool = false, now: Date = .now) {
         if let last = store.asked[package]?[cap], now.timeIntervalSince(last) < 86_400 { return }
         store.asked[package, default: [:]][cap] = now
         save()
         let n = UNMutableNotificationContent()
-        n.title = String(localized: "\(package) wants \(Self.label(cap))")
+        n.title = write ? String(localized: "\(package) wants to read and change data on \(String(cap.dropFirst(5)))")
+            : String(localized: "\(package) wants \(Self.label(cap))")
         n.body = String(localized: "Allow or deny it in FMC Companion.")
         n.userInfo = ["package": package]
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "ask-\(package)-\(cap)", content: n,
@@ -79,6 +83,16 @@ import WireKit
         store.grants[package, default: [:]][cap] = allowed
         save()
         if allowed { Task { await PhoneServices.shared.requestOS(cap) } }
+    }
+
+    /// The headers the user set for the app's requests to `host`: in the Keychain, never logged or sent to the watch.
+    func headers(_ package: String, _ host: String) -> [HTTPHeader] {
+        Keychain.get("h|\(package)|\(host)").flatMap { try? JSONDecoder().decode([HTTPHeader].self, from: Data($0.utf8)) } ?? []
+    }
+
+    func setHeaders(_ package: String, _ host: String, _ list: [HTTPHeader]) {
+        let json = try? JSONEncoder().encode(list)
+        Keychain.set("h|\(package)|\(host)", list.isEmpty ? nil : json.flatMap { String(data: $0, encoding: .utf8) })
     }
 
     func showText(_ package: String) -> Bool { store.showText.contains(package) }

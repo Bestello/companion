@@ -76,6 +76,43 @@ class RpcTest {
         assertNull(httpHost(("https://example.com/" + "a".repeat(110)).toByteArray()))
     }
 
+    /** Each case to fresh parts: no reply before the last message, then the joined request or BAD_REQUEST. */
+    @Test fun httpRequestVectors() = each("http_request") { t ->
+        val parts = RequestParts()
+        val msgs = t.getJSONArray("messages").let { a -> (0 until a.length()).map { hex(a.getString(it)) } }
+        var joined: ByteArray? = null
+        var bad = false
+        for ((i, m) in msgs.withIndex()) {
+            val r = parseRequest(m)!!
+            if (r.method == null) { bad = true; break }
+            assertEquals(Method.HTTP_REQUEST, r.method)
+            try {
+                joined = parts.add("a", r.id, r.args)
+                assertEquals(i < msgs.size - 1, joined == null, t.getString("note"))
+            } catch (e: RpcError) {
+                assertEquals(msgs.size - 1, i, t.getString("note"))
+                bad = true
+            }
+        }
+        val call = joined?.let { parseHttpCall(it) }
+        if (t.optBoolean("bad")) {
+            assert(bad || call == null) { t.getString("note") }
+        } else {
+            val q = t.getJSONObject("request")
+            assertEquals(HttpCall(q.getString("method"), q.getString("url"), "", hex(q.getString("body"))), call, t.getString("note"))
+        }
+    }
+
+    @Test fun headers() {
+        val auth = "Authorization" to "Bearer x"
+        val json = "Content-Type" to "application/json"
+        assertEquals(listOf(auth, json), requestHeaders(listOf(auth), "{}".toByteArray()))
+        assertEquals(listOf(auth, json), requestHeaders(listOf(auth), "[1]".toByteArray()))
+        assertEquals(listOf(auth), requestHeaders(listOf(auth), "a=1".toByteArray()))
+        assertEquals(listOf("content-type" to "text/plain"), requestHeaders(listOf("content-type" to "text/plain"), "{}".toByteArray()))
+        assertEquals(emptyList(), requestHeaders(listOf(" " to "x"), ByteArray(0)))
+    }
+
     @Test fun notifications() = each("notifications") { t ->
         val i = t.getJSONObject("in")
         assertEquals(t.getString("hex"),
@@ -92,12 +129,16 @@ class RpcTest {
     /** Grants as the dispatcher reads them; `slow` makes the service miss the budget. */
     private class FakePhone(val grants: MutableMap<String, Boolean> = mutableMapOf(), var os: Boolean = true) : Phone {
         val asked = mutableListOf<String>()
+        val writes = mutableListOf<Boolean>()
+        val calls = mutableListOf<Pair<Int, ByteArray>>()
+        override val parts = RequestParts()
         var slow = false
         override fun grants(pkg: String) = grants
         override fun osAllows(cap: String) = os
-        override fun ask(pkg: String, cap: String) { asked += "$pkg $cap" }
+        override fun ask(pkg: String, cap: String, write: Boolean) { asked += "$pkg $cap"; writes += write }
         override suspend fun call(pkg: String, method: Int, args: ByteArray): List<ByteArray> {
             if (slow) delay(10_000)
+            calls += method to args
             return listOf(bytes(method))
         }
     }
@@ -122,10 +163,35 @@ class RpcTest {
         assertEquals(RpcStatus.BAD_REQUEST, status(answer("a", hex("5231510110"), p)), "calendar without args")
         assertNull(answer("a", hex("5231500100"), p))
         p.grants["http:example.com"] = true
-        assertEquals("523141070000011040", answer("a", hex("5231510701"), p)!!.single().hex(), "caps")
+        assertEquals("52314107000001104041", answer("a", hex("5231510701"), p)!!.single().hex(), "caps")
         p.slow = true
         val t0 = System.currentTimeMillis()
         assertEquals(RpcStatus.UNAVAILABLE, status(answer("a", cal, p, budgetMs = 300)))
         assert(System.currentTimeMillis() - t0 < 2000)
+    }
+
+    @Test fun httpRequestDispatch() = runBlocking {
+        val p = FakePhone()
+        val payload = byteArrayOf(1, 20) + "https://example.com/".toByteArray() + "{\"a\":1}".toByteArray()
+        fun part(id: Int, index: Int, total: Int, chunk: ByteArray) =
+            "R1Q".toByteArray() + byteArrayOf(id.toByte(), 0x41, index.toByte(), total.toByte()) + chunk
+        val one = part(4, 0, 1, payload)
+        assertEquals(RpcStatus.ASK, status(answer("a", one, p)))
+        assertEquals(listOf("a http:example.com"), p.asked)
+        assertEquals(listOf(true), p.writes, "the ask says it can change data")
+        p.grants["http:example.com"] = true
+        assertEquals(RpcStatus.OK, status(answer("a", one, p)))
+        assertEquals(payload.hex(), p.calls.single().second.hex(), "the service gets the joined payload")
+        val a = part(5, 0, 2, payload.copyOfRange(0, 10))
+        val b = part(5, 1, 2, payload.copyOfRange(10, payload.size))
+        assertEquals(emptyList(), answer("a", a, p), "no reply before the last part")
+        assertEquals(RpcStatus.OK, status(answer("a", b, p)))
+        assertEquals(payload.hex(), p.calls.last().second.hex())
+        answer("a", a, p)
+        assertEquals(RpcStatus.BAD_REQUEST, status(answer("a", part(6, 1, 2, payload.copyOfRange(10, payload.size)), p)), "new id")
+        assertEquals(RpcStatus.BAD_REQUEST, status(answer("a", b, p)), "the dropped request doesn't come back")
+        answer("a", a, p)
+        answer("b", a, p)
+        assertEquals(RpcStatus.OK, status(answer("a", b, p)), "parts are per package")
     }
 }

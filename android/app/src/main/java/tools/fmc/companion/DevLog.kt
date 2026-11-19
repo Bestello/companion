@@ -64,7 +64,7 @@ object DevLog {
         lines.clear()
     }
 
-    private val methods = mapOf(0x01 to "caps", 0x10 to "calendar.events", 0x20 to "location", 0x30 to "weather",
+    private val methods = mapOf(0x01 to "caps", 0x10 to "calendar.events", 0x20 to "location", 0x30 to "weather", 0x41 to "http.request",
         0x40 to "http.get", 0x50 to "notifications")
     private val statuses = listOf("OK", "BAD_REQUEST", "DENIED", "UNAVAILABLE", "ASK", "TOO_LARGE")
 

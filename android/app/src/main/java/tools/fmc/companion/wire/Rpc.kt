@@ -21,6 +21,7 @@ object Method {
     const val LOCATION = 0x20
     const val WEATHER = 0x30
     const val HTTP = 0x40
+    const val HTTP_REQUEST = 0x41
     const val NOTIFICATIONS = 0x50
 }
 
@@ -118,12 +119,69 @@ fun notificationRecord(ageMin: Long, app: String, text: String, show: Boolean): 
     }
 }
 
-/** The lowercased host of an `https://` URL of at most 123 bytes; null for anything else. */
-fun httpHost(args: ByteArray): String? {
-    if (args.isEmpty() || args.size > 123) return null
+/** The lowercased host of an `https://` URL of at most `max` bytes; null for anything else. */
+fun httpHost(args: ByteArray, max: Int = 123): String? {
+    if (args.isEmpty() || args.size > max) return null
     val uri = runCatching { URI(String(args)) }.getOrNull() ?: return null
     if (uri.scheme?.lowercase() != "https") return null
     return uri.host?.lowercase()?.takeIf { it.isNotEmpty() }
+}
+
+/** One `http.request` (0x41), or `http.get` as GET with no body. `host` lowercased: the cap is `http:<host>`. */
+class HttpCall(val method: String, val url: String, val host: String, val body: ByteArray = ByteArray(0)) {
+    override fun equals(other: Any?) = other is HttpCall && method == other.method && url == other.url && body.contentEquals(other.body)
+    override fun hashCode() = url.hashCode()
+    override fun toString() = "$method $url ${body.size} B"
+
+    companion object {
+        val METHODS = listOf("GET", "POST", "PUT", "PATCH", "DELETE")
+    }
+}
+
+/** The joined `http.request` payload, `method ‖ url_len ‖ url ‖ body`; null: unknown method, not https, a url past
+ *  the end, GET with a body. */
+fun parseHttpCall(p: ByteArray): HttpCall? {
+    if (p.size < 2 || p.u8(0) >= HttpCall.METHODS.size || p.size < 2 + p.u8(1)) return null
+    val urlBytes = p.copyOfRange(2, 2 + p.u8(1))
+    val host = httpHost(urlBytes, max = 255) ?: return null
+    val body = p.copyOfRange(2 + p.u8(1), p.size)
+    if (p.u8(0) == 0 && body.isNotEmpty()) return null
+    return HttpCall(HttpCall.METHODS[p.u8(0)], String(urlBytes), host, body)
+}
+
+/** The user's headers (name to value), plus `Content-Type: application/json` for a body that starts with `{` or `[`
+ *  when they set none. */
+fun requestHeaders(user: List<Pair<String, String>>, body: ByteArray): List<Pair<String, String>> {
+    val named = user.filter { it.first.isNotBlank() }
+    val json = body.firstOrNull()?.let { it == '{'.code.toByte() || it == '['.code.toByte() } == true
+    if (!json || named.any { it.first.equals("content-type", ignoreCase = true) }) return named
+    return named + ("Content-Type" to "application/json")
+}
+
+/** Joins the parts of `http.request` (`index ‖ total ‖ chunk`), one open request per package. */
+class RequestParts {
+    private class Open(val id: Int, val total: Int, val next: Int, val data: ByteArray)
+    private val open = mutableMapOf<String, Open>()
+
+    /** The joined payload after the last part, null before it. `BAD_REQUEST` for a part out of order, a new id
+     *  before the last part, or total outside 1..9; the open request is dropped then. */
+    @Synchronized fun add(pkg: String, id: Int, args: ByteArray): ByteArray? {
+        val prev = open.remove(pkg)
+        if (args.size < 2 || args.size - 2 > RECORD_MAX || args.u8(1) !in 1..9) throw RpcError(RpcStatus.BAD_REQUEST)
+        val index = args.u8(0)
+        val total = args.u8(1)
+        val chunk = args.copyOfRange(2, args.size)
+        val data = if (prev != null) {
+            if (prev.id != id || prev.total != total || index != prev.next) throw RpcError(RpcStatus.BAD_REQUEST)
+            prev.data + chunk
+        } else {
+            if (index != 0) throw RpcError(RpcStatus.BAD_REQUEST)
+            chunk
+        }
+        if (index == total - 1) return data
+        open[pkg] = Open(id, total, index + 1, data)
+        return null
+    }
 }
 
 /** The cap a request needs; null: unknown method or args it can't take. */
@@ -132,6 +190,7 @@ fun capOf(method: Int, args: ByteArray): String? = when (method) {
     Method.LOCATION -> "location"
     Method.WEATHER -> "weather".takeIf { args.size == 1 }
     Method.HTTP -> httpHost(args)?.let { "http:$it" }
+    Method.HTTP_REQUEST -> parseHttpCall(args)?.let { "http:${it.host}" }
     Method.NOTIFICATIONS -> "notifications".takeIf { args.size == 1 }
     else -> null
 }
@@ -142,10 +201,15 @@ interface Phone {
     fun grants(pkg: String): Map<String, Boolean>
     fun osAllows(cap: String): Boolean
 
-    /** Keeps the pending request and tells the user, at most once a day per (pkg, cap). */
-    fun ask(pkg: String, cap: String)
+    /** Keeps the pending request and tells the user, at most once a day per (pkg, cap). `write`: http.request, which
+     *  can change data on the host (the ask says so). */
+    fun ask(pkg: String, cap: String, write: Boolean)
 
-    /** The records of a granted call; `RpcError` for any other status. */
+    /** Joins http.request parts; one per phone. */
+    val parts: RequestParts
+
+    /** The records of a granted call; `RpcError` for any other status. For http.request `args` is the joined
+     *  payload. */
     suspend fun call(pkg: String, method: Int, args: ByteArray): List<ByteArray>
 }
 
@@ -158,17 +222,23 @@ suspend fun answer(pkg: String, msg: ByteArray, phone: Phone, budgetMs: Long = 7
     if (method == Method.CAPS) {
         val fixed = listOf(Method.CALENDAR to "calendar", Method.LOCATION to "location", Method.WEATHER to "weather",
             Method.NOTIFICATIONS to "notifications").filter { ok(it.second) }.map { it.first }
-        val http = if (grants.any { it.key.startsWith("http:") && it.value }) listOf(Method.HTTP) else emptyList()
+        val http = if (grants.any { it.key.startsWith("http:") && it.value }) listOf(Method.HTTP, Method.HTTP_REQUEST) else emptyList()
         return replies(r.id, RpcStatus.OK, listOf((fixed + http).sorted().map { it.toByte() }.toByteArray()))
     }
-    val cap = capOf(method, r.args) ?: return replies(r.id, RpcStatus.BAD_REQUEST)
+    // http.request: no reply before its last part, then the joined payload stands for the args
+    val args = if (method != Method.HTTP_REQUEST) r.args else try {
+        phone.parts.add(pkg, r.id, r.args) ?: return emptyList()
+    } catch (e: RpcError) {
+        return replies(r.id, e.status)
+    }
+    val cap = capOf(method, args) ?: return replies(r.id, RpcStatus.BAD_REQUEST)
     when (grants[cap]) {
-        null -> { phone.ask(pkg, cap); return replies(r.id, RpcStatus.ASK) }
+        null -> { phone.ask(pkg, cap, method == Method.HTTP_REQUEST); return replies(r.id, RpcStatus.ASK) }
         false -> return replies(r.id, RpcStatus.DENIED)
         true -> if (!phone.osAllows(cap)) return replies(r.id, RpcStatus.DENIED)
     }
     // not a child of the caller: a service stuck in blocking I/O must not hold the reply past the budget
-    val run = CoroutineScope(Dispatchers.IO).async { runCatching { phone.call(pkg, method, r.args) } }
+    val run = CoroutineScope(Dispatchers.IO).async { runCatching { phone.call(pkg, method, args) } }
     val result = withTimeoutOrNull(budgetMs) { run.await() }
         ?: return replies(r.id, RpcStatus.UNAVAILABLE).also { run.cancel() }
     return result.fold({ replies(r.id, RpcStatus.OK, it) }, { replies(r.id, (it as? RpcError)?.status ?: RpcStatus.UNAVAILABLE) })

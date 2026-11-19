@@ -108,7 +108,8 @@ class RpcService : Service() {
             }
             if (parseRequest(m) == null) continue
             val pkg = names[slot] ?: packageIn(s, slot)?.also { names[slot] = it } ?: continue
-            val replies = answer(pkg, m, phone) ?: continue
+            // empty: a part of http.request before its last
+            val replies = answer(pkg, m, phone)?.takeIf { it.isNotEmpty() } ?: continue
             val line = DevLog.request(pkg, m, replies)
             try {
                 for (r in replies) s.send(r)

@@ -2,7 +2,13 @@ package tools.fmc.companion
 
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import okhttp3.CookieJar
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -48,32 +54,37 @@ suspend fun download(url: String, first: Int? = null): ByteArray = withContext(D
     }
 }
 
+private val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).build()
+
 /**
- * A GET for the miniapp services: (status, body), any status. No cookies (none are set app-wide),
- * `User-Agent: FMC-Companion`, redirects followed only within the same host, at most `max` bytes read (+1 to tell
- * a longer body). `timeoutMs` bounds connect and each read; the dispatcher's budget bounds the whole.
+ * A request for the miniapp services (and the weather): (status, body), any status. OkHttp, since HttpURLConnection
+ * refuses PATCH. `User-Agent: FMC-Companion`, then `headers`; cookies from and into `cookies`. Redirects followed
+ * only within the same host (301-303 turn into a GET without the body); at most `max` bytes read (+1 to tell a
+ * longer body). `timeoutMs` bounds connect and each read; the dispatcher's budget bounds the whole.
  */
-suspend fun fetch(url: String, timeoutMs: Int = 6000, max: Int = 1 shl 20): Pair<Int, ByteArray> = withContext(Dispatchers.IO) {
-    var u = URL(url)
+suspend fun fetch(
+    url: String, timeoutMs: Int = 6000, max: Int = 1 shl 20, method: String = "GET", body: ByteArray = ByteArray(0),
+    headers: List<Pair<String, String>> = emptyList(), cookies: CookieJar = CookieJar.NO_COOKIES,
+): Pair<Int, ByteArray> = withContext(Dispatchers.IO) {
+    val c = client.newBuilder().cookieJar(cookies).connectTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+        .readTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS).writeTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS).build()
+    var u = url.toHttpUrl()
+    var m = method
+    var b = body
     repeat(5) {
-        val c = u.openConnection() as HttpURLConnection
-        try {
-            c.instanceFollowRedirects = false
-            c.useCaches = false
-            c.connectTimeout = timeoutMs
-            c.readTimeout = timeoutMs
-            c.setRequestProperty("User-Agent", "FMC-Companion")
-            val status = c.responseCode
-            val next = c.getHeaderField("Location")?.let { URL(u, it) }
-            if (status in 300..399 && next != null) {
-                if (next.protocol != "https" || !next.host.equals(u.host, ignoreCase = true)) return@withContext status to ByteArray(0)
+        val req = Request.Builder().url(u).header("User-Agent", "FMC-Companion")
+            .apply { headers.forEach { (k, v) -> header(k, v) } }
+            .method(m, if (m == "GET" || (m == "DELETE" && b.isEmpty())) null else b.toRequestBody())
+            .build()
+        c.newCall(req).execute().use { r ->
+            val next = r.header("Location")?.let { u.resolve(it) }
+            if (r.code in 300..399 && next != null) {
+                if (!next.isHttps || !next.host.equals(u.host, ignoreCase = true)) return@withContext r.code to ByteArray(0)
+                if (r.code in 301..303) { m = "GET"; b = ByteArray(0) }
                 u = next
                 return@repeat
             }
-            val body = (if (status < 400) c.inputStream else c.errorStream)?.use { readUpTo(it, max + 1) } ?: ByteArray(0)
-            return@withContext status to body
-        } finally {
-            c.disconnect()
+            return@withContext r.code to (r.body?.byteStream()?.use { readUpTo(it, max + 1) } ?: ByteArray(0))
         }
     }
     throw ServerError(310, "Too many redirects")

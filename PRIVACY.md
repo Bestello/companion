@@ -1,6 +1,6 @@
 # FMC Companion privacy policy
 
-Last updated: November 18, 2026
+Last updated: November 19, 2026
 
 FMC Companion (iOS and Android) installs watch faces, firmware and apps on the CMF Watch Pro 2 and passes data
 between the phone and the apps on the watch. It has no ads and no tracking, and it doesn't sell or share your data.
@@ -12,6 +12,9 @@ It counts anonymous usage events (see below).
   on the phone.
 - **Permissions you grant to watch apps.** Your answers are stored only on the phone. Deleting an app from the watch
   with FMC Companion forgets them.
+- **Headers and cookies for watch apps' web requests.** Headers you type for an app and a host (an API key, for
+  example) are kept encrypted on the phone (iOS Keychain, Android Keystore) and never sent to the watch. Cookies a
+  host sets are kept in memory per app and host. Reset permissions or deleting the app forgets both.
 - **Calendar.** When you allow a watch app to use your calendars, upcoming events are read on the phone and sent to
   the watch over Bluetooth. They are not sent anywhere else.
 - **Notifications (Android).** When you allow a watch app to use notifications, their text is sent only to the watch.
@@ -24,7 +27,9 @@ It counts anonymous usage events (see below).
   the weather and the town's name. On iOS this goes through Apple's WeatherKit and geocoder; on Android, through
   Open-Meteo (location rounded to about 1 km) and the system's geocoder. The watch gets only the town and the
   weather, with the location rounded to about 10 km.
-- **Web requests by watch apps.** A watch app can fetch an `https://` address only on a host you allowed for it.
+- **Web requests by watch apps.** A watch app can read from and send data to an `https://` address only on a host
+  you allowed for it (GET, POST, PUT, PATCH, DELETE). The request carries what the watch app put in it, the headers
+  you set for that app and host, and the cookies that host set earlier. The host's answer goes to the watch.
 - **Updates (Android).** The app checks GitHub for a newer release.
 
 ## Anonymous usage statistics

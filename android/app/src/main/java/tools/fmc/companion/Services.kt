@@ -26,6 +26,11 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import tools.fmc.companion.wire.Event
 import tools.fmc.companion.wire.HTTP_BODY_MAX
+import tools.fmc.companion.wire.HttpCall
+import tools.fmc.companion.wire.RequestParts
+import tools.fmc.companion.wire.httpHost
+import tools.fmc.companion.wire.parseHttpCall
+import tools.fmc.companion.wire.requestHeaders
 import tools.fmc.companion.wire.Method
 import tools.fmc.companion.wire.Phone
 import tools.fmc.companion.wire.RpcError
@@ -47,9 +52,11 @@ import tools.fmc.companion.wire.weatherNow
 class PhoneServices(private val context: Context, private val grants: Grants) : Phone {
     override fun grants(pkg: String) = grants.of(pkg)
     override fun osAllows(cap: String) = osAllows(context, cap)
-    override fun ask(pkg: String, cap: String) {
-        if (grants.markAsked(pkg, cap)) notifyAsk(context, pkg, cap)
+    override fun ask(pkg: String, cap: String, write: Boolean) {
+        if (grants.markAsked(pkg, cap)) notifyAsk(context, pkg, cap, write)
     }
+
+    override val parts = RequestParts()
 
     override suspend fun call(pkg: String, method: Int, args: ByteArray): List<ByteArray> {
         val show = grants.showText(pkg)
@@ -59,10 +66,18 @@ class PhoneServices(private val context: Context, private val grants: Grants) : 
                 listOf(locationRecord(l.latitude, l.longitude, ageMin(l), place))
             }
             Method.WEATHER -> weather(args.u8(0).coerceAtMost(7))
-            Method.HTTP -> fetch(String(args), max = HTTP_BODY_MAX).let { (code, body) -> httpRecords(code, body) }
+            Method.HTTP -> http(pkg, HttpCall("GET", String(args), httpHost(args)!!))
+            Method.HTTP_REQUEST -> http(pkg, parseHttpCall(args)!!)
             Method.NOTIFICATIONS -> NotificationWatcher.records(context, args.u8(0).coerceIn(1, 10), show)
             else -> throw RpcError(RpcStatus.BAD_REQUEST)
         }
+    }
+
+    /** With the user's headers for (pkg, host) and its cookie jar; neither goes to the watch or the log. */
+    private suspend fun http(pkg: String, c: HttpCall): List<ByteArray> {
+        val (code, body) = fetch(c.url, max = HTTP_BODY_MAX, method = c.method, body = c.body,
+            headers = requestHeaders(grants.headers(pkg, c.host), c.body), cookies = Cookies.of(pkg, c.host))
+        return httpRecords(code, body)
     }
 
     private fun calendar(fromDay: Int, days: Int, limit: Int, show: Boolean): List<ByteArray> {

@@ -10,13 +10,19 @@ import android.content.pm.PackageManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import java.util.concurrent.ConcurrentHashMap
+import okhttp3.Cookie
+import okhttp3.CookieJar
+import okhttp3.HttpUrl
+import org.json.JSONArray
 
 // Who may call which miniapp service (docs/miniapp-rpc.md, "Permissions"). Keyed by the package name in the slot's
 // header. SharedPreferences "grants": "g|pkg|cap" = allowed, "p|pkg|cap" = asked at (ms, pending until answered),
-// "show|pkg" = text on the watch.
+// "show|pkg" = text on the watch. The headers the user set per (pkg, host) are secrets: SecureStore "h|pkg|host".
 
 class Grants(context: Context) {
     val prefs = context.getSharedPreferences("grants", Context.MODE_PRIVATE)!!
+    private val secure = SecureStore(context)
 
     private fun parts(prefix: String) = prefs.all.keys.filter { it.startsWith(prefix) }
         .map { it.removePrefix(prefix).split("|", limit = 2) }.filter { it.size == 2 }.map { it[0] to it[1] }
@@ -34,8 +40,10 @@ class Grants(context: Context) {
 
     fun pendingCount(pkg: String) = caps(pkg).count { isPending(pkg, it) }
 
-    /** Forgets every answer: the next calls ask again. */
+    /** Forgets every answer, the headers and the cookies: the next calls ask again. */
     fun reset(pkg: String) {
+        caps(pkg).filter { it.startsWith("http:") }.forEach { secure["h|$pkg|${it.removePrefix("http:")}"] = null }
+        Cookies.clear(pkg)
         val e = prefs.edit()
         prefs.all.keys.filter { it.startsWith("g|$pkg|") || it.startsWith("p|$pkg|") || it == "show|$pkg" }.forEach { e.remove(it) }
         e.apply()
@@ -53,6 +61,15 @@ class Grants(context: Context) {
         if (now - prefs.getLong("p|$pkg|$cap", 0) < 24 * 3600_000L) return false
         prefs.edit().putLong("p|$pkg|$cap", now).apply()
         return true
+    }
+
+    /** The headers the user set for the app's requests to `host`; never logged, never sent to the watch. */
+    fun headers(pkg: String, host: String): List<Pair<String, String>> = secure["h|$pkg|$host"]?.let { s ->
+        runCatching { JSONArray(s).let { a -> (0 until a.length()).map { a.getJSONArray(it).let { p -> p.getString(0) to p.getString(1) } } } }.getOrNull()
+    } ?: emptyList()
+
+    fun setHeaders(pkg: String, host: String, list: List<Pair<String, String>>) {
+        secure["h|$pkg|$host"] = if (list.isEmpty()) null else JSONArray(list.map { JSONArray(listOf(it.first, it.second)) }).toString()
     }
 
     fun showText(pkg: String) = prefs.getBoolean("show|$pkg", false)
@@ -89,16 +106,42 @@ fun appsIntent(context: Context, pkg: String? = null): PendingIntent = PendingIn
     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
 )
 
-/** "‹package› wants ‹cap›"; nothing without POST_NOTIFICATIONS (its page under Apps still shows it). */
-fun notifyAsk(context: Context, pkg: String, cap: String) {
+/** "‹package› wants ‹cap›"; nothing without POST_NOTIFICATIONS (its page under Apps still shows it). `write`:
+ *  http.request, "wants to read and change data on ‹host›". */
+fun notifyAsk(context: Context, pkg: String, cap: String, write: Boolean = false) {
     if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
     channel(context, "ask", "Watch app requests", NotificationManager.IMPORTANCE_DEFAULT)
     val n = NotificationCompat.Builder(context, "ask")
         .setSmallIcon(R.drawable.ic_watch)
-        .setContentTitle("$pkg wants ${capLabel(cap)}")
+        .setContentTitle(if (write) "$pkg wants to read and change data on ${cap.removePrefix("http:")}" else "$pkg wants ${capLabel(cap)}")
         .setContentText("Allow or deny it in FMC Companion.")
         .setContentIntent(appsIntent(context, pkg))
         .setAutoCancel(true)
         .build()
     context.getSystemService(NotificationManager::class.java).notify("$pkg|$cap".hashCode(), n)
+}
+
+/** A cookie jar per (package, host) for the watch apps' requests, kept across them.
+ *  ponytail: in memory, gone when the service dies; a file (encrypted) if apps need a login to outlive that. */
+object Cookies {
+    private val jars = ConcurrentHashMap<String, Jar>()
+
+    fun of(pkg: String, host: String): CookieJar = jars.getOrPut("$pkg|$host") { Jar() }
+    fun clear(pkg: String) = jars.keys.removeAll { it.startsWith("$pkg|") }
+
+    private class Jar : CookieJar {
+        private val list = mutableListOf<Cookie>()
+
+        @Synchronized override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+            for (c in cookies) {
+                list.removeAll { it.name == c.name && it.domain == c.domain && it.path == c.path }
+                list += c
+            }
+        }
+
+        @Synchronized override fun loadForRequest(url: HttpUrl): List<Cookie> {
+            list.removeAll { it.expiresAt < System.currentTimeMillis() }
+            return list.filter { it.matches(url) }
+        }
+    }
 }

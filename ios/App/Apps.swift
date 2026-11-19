@@ -204,7 +204,12 @@ struct AppsTab: View {
             AppsView()
                 .navigationDestination(for: String.self) { value in
                     // "store:<name>" from All: the store page; a bare name: the app's settings
-                    if value.hasPrefix("store:") { AppView(name: String(value.dropFirst(6)), store: true) } else { AppView(name: value) }
+                    // "headers:<name>|<host>": the headers its requests to that host carry
+                    if value.hasPrefix("store:") { AppView(name: String(value.dropFirst(6)), store: true) }
+                    else if value.hasPrefix("headers:") {
+                        let p = value.dropFirst(8).split(separator: "|", maxSplits: 1).map(String.init)
+                        HeadersView(package: p[0], host: p.count > 1 ? p[1] : "")
+                    } else { AppView(name: value) }
                 }
         }
         .alert("Couldn't update", isPresented: Binding { AppUpdates.shared.error != nil } set: { if !$0 { AppUpdates.shared.error = nil } }) {
@@ -543,6 +548,16 @@ struct AppView: View {
                                 }
                             }
                         }
+                        if cap.hasPrefix("http:") {
+                            let host = String(cap.dropFirst(5))
+                            NavigationLink(value: "headers:\(name)|\(host)") {
+                                LabeledContent("Headers") {
+                                    let n = perms.headers(name, host).count
+                                    Text(n == 0 ? String(localized: "None") : "\(n)")
+                                }
+                                .padding(.leading, 41)
+                            }
+                        }
                     }
                     Toggle(isOn: Binding(get: { perms.showText(name) }, set: { perms.setShowText(name, $0) })) {
                         HStack(spacing: 12) {
@@ -647,5 +662,45 @@ private struct InfoStrip: View {
         }
         .frame(width: 104, alignment: .top)
         .overlay(alignment: .trailing) { Divider().frame(height: 36).frame(maxHeight: .infinity) }
+    }
+}
+
+/// Name/value pairs an app's requests to one host carry (an API key, `Authorization: Bearer …`). In the Keychain,
+/// never sent to the watch; saved as typed.
+struct HeadersView: View {
+    let package: String, host: String
+    private struct Row: Identifiable, Equatable { let id = UUID(); var name = "", value = "" }
+    @State private var rows: [Row] = []
+
+    var body: some View {
+        List {
+            Section {
+                ForEach($rows) { $row in
+                    VStack(spacing: 8) {
+                        TextField("Name", text: $row.name)
+                        Divider()
+                        TextField("Value", text: $row.value)
+                    }
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                }
+                .onDelete { rows.remove(atOffsets: $0) }
+                Button("Add Header") { rows.append(Row()) }
+            } header: {
+                Text(host)
+            } footer: {
+                Text("Sent with every request \(package) makes to \(host). They stay on this iPhone, in the Keychain, and never go to the watch.")
+            }
+        }
+        .navigationTitle("Headers")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { if !rows.isEmpty { EditButton() } }
+        .onAppear {
+            rows = Permissions.shared.headers(package, host).map { Row(name: $0.name, value: $0.value) }
+        }
+        .onChange(of: rows) {
+            Permissions.shared.setHeaders(package, host, rows.filter { !$0.name.trimmingCharacters(in: .whitespaces).isEmpty }
+                .map { HTTPHeader(name: $0.name, value: $0.value) })
+        }
     }
 }

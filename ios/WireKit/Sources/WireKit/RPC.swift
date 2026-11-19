@@ -10,7 +10,7 @@ public enum RPCStatus: UInt8, Error, Sendable {
 
 public enum RPCMethod {
     public static let caps: UInt8 = 0x01, calendar: UInt8 = 0x10, location: UInt8 = 0x20, weather: UInt8 = 0x30
-    public static let http: UInt8 = 0x40, notifications: UInt8 = 0x50
+    public static let http: UInt8 = 0x40, httpRequest: UInt8 = 0x41, notifications: UInt8 = 0x50
 }
 
 /// Every RPC message opens with "R1"; the app's own messages on the channel do not.
@@ -160,6 +160,74 @@ public func httpRecords(code: Int, body: Data) throws -> [Data] {
     }
 }
 
+/// One `http.request` (0x41) or `http.get` (as GET with no body).
+public struct HTTPCall: Equatable, Sendable {
+    public static let methods = ["GET", "POST", "PUT", "PATCH", "DELETE"]
+    public var method: String, url: URL, body: Data
+    public init(method: String, url: URL, body: Data = Data()) { (self.method, self.url, self.body) = (method, url, body) }
+    /// The lowercased host; the cap is `http:<host>`.
+    public var host: String { url.host?.lowercased() ?? "" }
+}
+
+/// An `https://` URL with a host; nil for anything else.
+func httpsURL(_ d: Data) -> URL? {
+    guard let s = String(data: d, encoding: .utf8), let url = URL(string: s), url.scheme?.lowercased() == "https",
+          let h = url.host, !h.isEmpty else { return nil }
+    return url
+}
+
+/// The joined `http.request` payload, `method:u8 ‖ url_len:u8 ‖ url ‖ body`; nil: unknown method, not https, a
+/// url past the end, GET with a body.
+public func parseHTTPCall(_ d: Data) -> HTTPCall? {
+    let b = [UInt8](d)
+    guard b.count >= 2, Int(b[0]) < HTTPCall.methods.count, b.count >= 2 + Int(b[1]),
+          let url = httpsURL(Data(b[2..<2 + Int(b[1])])) else { return nil }
+    let body = Data(b[(2 + Int(b[1]))...])
+    guard b[0] != 0 || body.isEmpty else { return nil }
+    return HTTPCall(method: HTTPCall.methods[Int(b[0])], url: url, body: body)
+}
+
+/// A header the user set for a watch app's requests to one host.
+public struct HTTPHeader: Codable, Hashable, Sendable {
+    public var name: String, value: String
+    public init(name: String, value: String) { (self.name, self.value) = (name, value) }
+}
+
+/// The user's headers, plus `Content-Type: application/json` for a body that starts with `{` or `[` when they set
+/// none.
+public func requestHeaders(_ user: [HTTPHeader], body: Data) -> [HTTPHeader] {
+    let named = user.filter { !$0.name.trimmingCharacters(in: .whitespaces).isEmpty }
+    guard let first = body.first, first == UInt8(ascii: "{") || first == UInt8(ascii: "["),
+          !named.contains(where: { $0.name.lowercased() == "content-type" }) else { return named }
+    return named + [HTTPHeader(name: "Content-Type", value: "application/json")]
+}
+
+/// Joins the parts of `http.request` (`index:u8 ‖ total:u8 ‖ chunk`), one open request per package.
+@MainActor public final class RequestParts {
+    private var open: [String: (id: UInt8, total: Int, next: Int, data: Data)] = [:]
+    public init() {}
+
+    /// The joined payload after the last part, nil before it. BAD_REQUEST for a part out of order, a new id
+    /// before the last part, or total outside 1…9; the open request is dropped then.
+    public func add(_ package: String, id: UInt8, args: Data) throws -> Data? {
+        let a = [UInt8](args)
+        let prev = open.removeValue(forKey: package)
+        guard a.count >= 2, a.count - 2 <= 121, (1...9).contains(Int(a[1])) else { throw RPCStatus.badRequest }
+        let index = Int(a[0]), total = Int(a[1])
+        let data: Data
+        if let prev {
+            guard prev.id == id, prev.total == total, index == prev.next else { throw RPCStatus.badRequest }
+            data = prev.data + a[2...]
+        } else {
+            guard index == 0 else { throw RPCStatus.badRequest }
+            data = Data(a[2...])
+        }
+        if index == total - 1 { return data }
+        open[package] = (id, total, index + 1, data)
+        return nil
+    }
+}
+
 public struct PhoneNotification: Equatable, Sendable {
     public var ageMin: Int, app: String, text: String
     public init(ageMin: Int, app: String, text: String) { (self.ageMin, self.app, self.text) = (ageMin, app, text) }
@@ -182,7 +250,8 @@ public func notificationRecord(_ n: PhoneNotification, show: Bool) -> Data {
     /// cap → allowed; a cap the user has not answered is missing.
     func grants(_ package: String) -> [String: Bool]
     /// The user has not answered: keep the request, tell the user (at most once a day).
-    func ask(_ package: String, _ cap: String)
+    /// `write`: http.request, which can change data on the host (the ask says so).
+    func ask(_ package: String, _ cap: String, write: Bool)
     /// The OS permission the cap needs is on.
     func osAllowed(_ cap: String) -> Bool
     /// "Show text on the watch" for this package.
@@ -192,7 +261,10 @@ public func notificationRecord(_ n: PhoneNotification, show: Bool) -> Data {
     func calendar(fromDay: Int, days: Int) async throws -> [CalendarEvent]
     func location() async throws -> LocationFix
     func weather() async throws -> (now: WeatherNow, days: [WeatherDay])
-    func httpGet(_ url: URL) async throws -> (code: Int, body: Data)
+    /// http.get and http.request, with the user's headers and the cookie jar of (package, host).
+    func http(_ call: HTTPCall, package: String) async throws -> (code: Int, body: Data)
+    /// Joins http.request parts; one per phone.
+    var parts: RequestParts { get }
     func notifications(limit: Int) async throws -> [PhoneNotification]
 }
 
@@ -206,8 +278,10 @@ public func answer(_ message: Data, package: String?, host: any RPCHost,
     case .call(let id, let method, let args)?:
         do {
             let records = try await withDeadline(deadline) {
-                try await run(method, args, package: package, host: host)
+                try await run(id, method, args, package: package, host: host)
             }
+            // nil: a part of http.request before its last, no reply
+            guard let records else { return [] }
             return replies(id: id, status: .ok, records: records)
         } catch let s as RPCStatus {
             return replies(id: id, status: s, records: [])
@@ -217,14 +291,14 @@ public func answer(_ message: Data, package: String?, host: any RPCHost,
     }
 }
 
-@MainActor private func run(_ method: UInt8, _ args: Data, package: String?, host: any RPCHost) async throws
-    -> [Data] {
+@MainActor private func run(_ id: UInt8, _ method: UInt8, _ args: Data, package: String?, host: any RPCHost)
+    async throws -> [Data]? {
     let a = [UInt8](args)
     guard let package else { throw RPCStatus.unavailable }
     func permit(_ cap: String) throws {
         switch host.grants(package)[cap] {
         case nil:
-            host.ask(package, cap)
+            host.ask(package, cap, write: method == RPCMethod.httpRequest)
             throw RPCStatus.ask
         case false?: throw RPCStatus.denied
         case true?: guard host.osAllowed(cap) else { throw RPCStatus.denied }
@@ -238,7 +312,7 @@ public func answer(_ message: Data, package: String?, host: any RPCHost,
         if on("calendar") { ids.append(RPCMethod.calendar) }
         if on("location") { ids.append(RPCMethod.location) }
         if on("weather") { ids.append(RPCMethod.weather) }
-        if g.contains(where: { $0.key.hasPrefix("http:") && $0.value }) { ids.append(RPCMethod.http) }
+        if g.contains(where: { $0.key.hasPrefix("http:") && $0.value }) { ids += [RPCMethod.http, RPCMethod.httpRequest] }
         if host.notificationsAvailable, on("notifications") { ids.append(RPCMethod.notifications) }
         return ids.isEmpty ? [] : [Data(ids)]
     case RPCMethod.calendar:
@@ -258,10 +332,16 @@ public func answer(_ message: Data, package: String?, host: any RPCHost,
         let w = try await host.weather()
         return [weatherRecord(w.now)] + w.days.prefix(min(Int(days), 7)).map { weatherRecord($0) }
     case RPCMethod.http:
-        guard args.count <= 123, let s = String(data: args, encoding: .utf8), let url = URL(string: s),
-              url.scheme?.lowercased() == "https", let h = url.host, !h.isEmpty else { throw RPCStatus.badRequest }
-        try permit("http:\(h.lowercased())")
-        let r = try await host.httpGet(url)
+        guard args.count <= 123, let url = httpsURL(args) else { throw RPCStatus.badRequest }
+        let call = HTTPCall(method: "GET", url: url)
+        try permit("http:\(call.host)")
+        let r = try await host.http(call, package: package)
+        return try httpRecords(code: r.code, body: r.body)
+    case RPCMethod.httpRequest:
+        guard let joined = try host.parts.add(package, id: id, args: args) else { return nil }
+        guard let call = parseHTTPCall(joined) else { throw RPCStatus.badRequest }
+        try permit("http:\(call.host)")
+        let r = try await host.http(call, package: package)
         return try httpRecords(code: r.code, body: r.body)
     case RPCMethod.notifications:
         guard host.notificationsAvailable else { throw RPCStatus.unavailable }

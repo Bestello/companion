@@ -26,7 +26,13 @@ import WireKit
     // MARK: grants
 
     func grants(_ package: String) -> [String: Bool] { Permissions.shared.grants(package) }
-    func ask(_ package: String, _ cap: String) { Permissions.shared.ask(package, cap) }
+    func ask(_ package: String, _ cap: String, write: Bool) { Permissions.shared.ask(package, cap, write: write) }
+    let parts = RequestParts()
+    /// "package|host" → the cookies the host set for that app's requests.
+    /// ponytail: in memory, gone with the process; Keychain if apps need a login to outlive that.
+    private var cookies: [String: [HTTPCookie]] = [:]
+
+    func clearCookies(_ package: String) { cookies = cookies.filter { !$0.key.hasPrefix("\(package)|") } }
     func showText(_ package: String) -> Bool { Permissions.shared.showText(package) }
     let notificationsAvailable = false
 
@@ -97,18 +103,37 @@ import WireKit
         return (now, days)
     }
 
-    func httpGet(_ url: URL) async throws -> (code: Int, body: Data) {
-        try await withDeadline(.seconds(6)) {
-            var req = URLRequest(url: url, timeoutInterval: 6)
-            req.setValue("FMC-Companion", forHTTPHeaderField: "User-Agent")
+    /// With the user's headers for (package, host) and its cookie jar; neither goes to the watch or the log.
+    /// ponytail: cookies set on a redirect's own response are not kept.
+    func http(_ call: HTTPCall, package: String) async throws -> (code: Int, body: Data) {
+        var req = URLRequest(url: call.url, timeoutInterval: 6)
+        req.httpMethod = call.method
+        req.setValue("FMC-Companion", forHTTPHeaderField: "User-Agent")
+        if !call.body.isEmpty { req.httpBody = call.body }
+        for h in requestHeaders(Permissions.shared.headers(package, call.host), body: call.body) {
+            req.setValue(h.value, forHTTPHeaderField: h.name)
+        }
+        let key = "\(package)|\(call.host)", path = call.url.path.isEmpty ? "/" : call.url.path
+        let jar = (cookies[key] ?? []).filter { ($0.expiresDate ?? .distantFuture) > .now && path.hasPrefix($0.path) }
+        for (k, v) in HTTPCookie.requestHeaderFields(with: jar) { req.setValue(v, forHTTPHeaderField: k) }
+        let r = try await withDeadline(.seconds(6)) { [req] in
             let (bytes, response) = try await Self.http.bytes(for: req, delegate: SameHost())
             var body = Data()
             for try await b in bytes {
                 body.append(b)
                 if body.count > 2048 { throw RPCStatus.tooLarge }
             }
-            return ((response as? HTTPURLResponse)?.statusCode ?? 0, body)
+            let http = response as? HTTPURLResponse
+            let fields = (http?.allHeaderFields ?? [:]).reduce(into: [String: String]()) {
+                if let k = $1.key as? String, let v = $1.value as? String { $0[k] = v }
+            }
+            return (http?.statusCode ?? 0, body, fields, http?.url ?? req.url!)
         }
+        let set = HTTPCookie.cookies(withResponseHeaderFields: r.2, for: r.3)
+        if !set.isEmpty {
+            cookies[key] = (cookies[key] ?? []).filter { c in !set.contains { $0.name == c.name && $0.path == c.path } } + set
+        }
+        return (r.0, r.1)
     }
 
     func notifications(limit: Int) async throws -> [PhoneNotification] { throw RPCStatus.unavailable }

@@ -308,6 +308,11 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit) {
 
 @Composable
 fun AppScreen(model: AppModel, value: String, open: (String) -> Unit, back: () -> Unit) {
+    // "headers:<name>|<host>": the headers the app's requests to that host carry
+    if (value.startsWith("headers:")) {
+        val (pkg, host) = value.removePrefix("headers:").split("|", limit = 2)
+        return HeadersScreen(pkg, host, back)
+    }
     // "store:<name>" from All: the store page; a bare name: the app's settings (permissions, Update, Delete)
     val store = value.startsWith("store:")
     val name = value.removePrefix("store:")
@@ -452,6 +457,16 @@ fun AppScreen(model: AppModel, value: String, open: (String) -> Unit, back: () -
                                     grants.set(name, cap, on)
                                     if (on) askOs(cap)
                                 })
+                            }
+                            if (cap.startsWith("http:")) {
+                                val host = cap.removePrefix("http:")
+                                val n = grants.headers(name, host).size
+                                Row(Modifier.fillMaxWidth().padding(start = 50.dp).clickable { open("headers:$name|$host") },
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Headers", Modifier.weight(1f))
+                                    Text(if (n == 0) "None" else "$n", color = Fmc.secondary)
+                                    Text("  ›", color = Fmc.secondary)
+                                }
                             }
                         }
                         HorizontalDivider()
@@ -613,4 +628,37 @@ private fun ColumnScope.InfoStrip(app: WatchApp, listing: StoreApps.Listing) {
         }
     }
     HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+}
+
+/** Name/value pairs the app's requests to `host` carry (an API key, `Authorization: Bearer …`). Kept encrypted on the
+ *  phone, never sent to the watch; saved as typed. */
+@Composable
+fun HeadersScreen(pkg: String, host: String, back: () -> Unit) {
+    val context = LocalContext.current
+    val grants = remember { Grants(context) }
+    val rows = remember { androidx.compose.runtime.mutableStateListOf(*grants.headers(pkg, host).toTypedArray()) }
+    fun save() = grants.setHeaders(pkg, host, rows.filter { it.first.isNotBlank() })
+    Column {
+        Bar("Headers", back)
+        LazyColumn {
+            item {
+                Section(host, footer = "Sent with every request $pkg makes to $host. They stay on this phone, encrypted, and never go to the watch.") {
+                    rows.forEachIndexed { i, (k, v) ->
+                        if (i > 0) HorizontalDivider()
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                androidx.compose.material3.OutlinedTextField(k, { rows[i] = it to v; save() }, Modifier.fillMaxWidth(),
+                                    label = { Text("Name") }, singleLine = true)
+                                androidx.compose.material3.OutlinedTextField(v, { rows[i] = k to it; save() }, Modifier.fillMaxWidth(),
+                                    label = { Text("Value") }, singleLine = true)
+                            }
+                            TextButton({ rows.removeAt(i); save() }) { Text("Delete", color = Fmc.danger) }
+                        }
+                    }
+                    if (rows.isNotEmpty()) HorizontalDivider()
+                    Text("Add header", Modifier.fillMaxWidth().clickable { rows.add("" to "") }, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+    }
 }

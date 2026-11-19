@@ -31,6 +31,10 @@ struct RPCVectors: Decodable {
         struct In: Decodable { let code: Int; let body: String }
         let `in`: In; let records: [String]
     }
+    struct HttpReq: Decodable {
+        struct R: Decodable { let method: String, url: String, body: String }
+        let note: String; let messages: [String]; let request: R?; let bad: Bool?
+    }
     struct Notif: Decodable {
         struct In: Decodable { let age_min: Int, app: String, text: String, show: Bool }
         let `in`: In; let hex: String
@@ -43,6 +47,7 @@ struct RPCVectors: Decodable {
     let location: [Loc]
     let weather: [Weather]
     let http: [Http]
+    let http_request: [HttpReq]
     let notifications: [Notif]
     let replies: [Reply]
 
@@ -134,6 +139,45 @@ private let rv = RPCVectors.shared
     #expect(throws: RPCStatus.tooLarge) { try httpRecords(code: 200, body: Data(count: 2049)) }
 }
 
+/// Each case to fresh parts: no reply before the last message, then the joined request or BAD_REQUEST.
+@Test @MainActor func rpcHttpRequestVectors() {
+    for c in rv.http_request {
+        let parts = RequestParts()
+        var joined: Data?
+        var bad = false
+        for (i, m) in c.messages.enumerated() {
+            guard case .call(let id, let method, let args)? = parseRequest(hex(m)) else { bad = true; break }
+            #expect(method == RPCMethod.httpRequest, "\(c.note)")
+            do {
+                joined = try parts.add("a", id: id, args: args)
+                #expect((joined == nil) == (i < c.messages.count - 1), "\(c.note): reply only after the last part")
+            } catch {
+                #expect(i == c.messages.count - 1, "\(c.note): only the last message is refused")
+                bad = true
+            }
+        }
+        let call = joined.flatMap(parseHTTPCall)
+        if c.bad == true {
+            #expect(bad || call == nil, "\(c.note)")
+        } else {
+            #expect(call == HTTPCall(method: c.request!.method, url: URL(string: c.request!.url)!, body: hex(c.request!.body)),
+                    "\(c.note)")
+        }
+    }
+}
+
+@Test func rpcRequestHeaders() {
+    let auth = HTTPHeader(name: "Authorization", value: "Bearer x")
+    let json = HTTPHeader(name: "Content-Type", value: "application/json")
+    #expect(requestHeaders([auth], body: Data("{}".utf8)) == [auth, json])
+    #expect(requestHeaders([auth], body: Data("[1]".utf8)) == [auth, json])
+    #expect(requestHeaders([auth], body: Data("a=1".utf8)) == [auth])
+    #expect(requestHeaders([], body: Data()) == [])
+    let mine = HTTPHeader(name: "content-type", value: "text/plain")
+    #expect(requestHeaders([mine], body: Data("{}".utf8)) == [mine], "the user's own Content-Type wins")
+    #expect(requestHeaders([HTTPHeader(name: " ", value: "x")], body: Data()) == [], "unnamed rows dropped")
+}
+
 @Test func rpcReplies() {
     for r in rv.replies {
         #expect(replies(id: r.id, status: RPCStatus(rawValue: r.status)!, records: r.records.map(hex))
@@ -153,7 +197,10 @@ private let rv = RPCVectors.shared
     var slow = false
 
     func grants(_ package: String) -> [String: Bool] { given[package] ?? [:] }
-    func ask(_ package: String, _ cap: String) { asked.append("\(package) \(cap)") }
+    var writes: [Bool] = []
+    let parts = RequestParts()
+    var calls: [HTTPCall] = []
+    func ask(_ package: String, _ cap: String, write: Bool) { asked.append("\(package) \(cap)"); writes.append(write) }
     func osAllowed(_ cap: String) -> Bool { !osOff.contains(cap) }
     func showText(_ package: String) -> Bool { show }
     func calendar(fromDay: Int, days: Int) async throws -> [CalendarEvent] {
@@ -165,7 +212,10 @@ private let rv = RPCVectors.shared
         (WeatherNow(temp: 1, code: 0, wind: 1, humidity: 50, ageMin: 0),
          (0..<10).map { WeatherDay(day: $0, min: 0, max: 1, code: 0, precip: 0) })
     }
-    func httpGet(_ url: URL) async throws -> (code: Int, body: Data) { (200, Data("ok".utf8)) }
+    func http(_ call: HTTPCall, package: String) async throws -> (code: Int, body: Data) {
+        calls.append(call)
+        return (200, Data("ok".utf8))
+    }
     func notifications(limit: Int) async throws -> [PhoneNotification] { [] }
 }
 
@@ -194,7 +244,7 @@ private func ask(_ host: FakeHost, _ m: Data, package: String? = "weather.app",
     h.given["weather.app"] = ["calendar": true, "http:example.com": true]
     h.osOff = ["calendar"]
     #expect(await ask(h, cal)?.0 == .denied, "OS permission off")
-    #expect(await ask(h, call(RPCMethod.caps))?.1 == [Data([RPCMethod.http])])
+    #expect(await ask(h, call(RPCMethod.caps))?.1 == [Data([RPCMethod.http, RPCMethod.httpRequest])])
 
     h.osOff = []
     h.events = [
@@ -206,7 +256,7 @@ private func ask(_ host: FakeHost, _ m: Data, package: String? = "weather.app",
     #expect(s == .ok)
     #expect(records.map { $0[0] } == [0, 1], "sorted, all-day first in a day, cut to limit")
     #expect(records.allSatisfy { $0[5] & 4 != 0 && $0.count == 8 }, "text hidden by default")
-    #expect(await ask(h, call(RPCMethod.caps))?.1 == [Data([RPCMethod.calendar, RPCMethod.http])])
+    #expect(await ask(h, call(RPCMethod.caps))?.1 == [Data([RPCMethod.calendar, RPCMethod.http, RPCMethod.httpRequest])])
 }
 
 @Test @MainActor func rpcBadRequests() async {
@@ -233,4 +283,31 @@ private func ask(_ host: FakeHost, _ m: Data, package: String? = "weather.app",
     #expect(await ask(h, call(RPCMethod.weather, [99]))?.1.count == 8, "days clamped to 7")
     h.slow = true
     #expect(await ask(h, call(RPCMethod.calendar, [0, 1, 1]), deadline: .milliseconds(200))?.0 == .unavailable)
+}
+
+@Test @MainActor func rpcHttpRequestDispatch() async throws {
+    let h = FakeHost()
+    let body = Data(#"{"a":1}"#.utf8)
+    let payload = Data([1, 20]) + Data("https://example.com/".utf8) + body
+    let one = call(RPCMethod.httpRequest, [0, 1] + Array(payload), id: 4)
+    #expect(await ask(h, one)?.0 == .ask)
+    #expect(h.asked == ["weather.app http:example.com"] && h.writes == [true], "the ask says it can change data")
+    h.given["weather.app"] = ["http:example.com": true]
+    #expect(await ask(h, one)?.1 == [Data([200, 0, 2, 0]), Data("ok".utf8)])
+    #expect(h.calls == [HTTPCall(method: "POST", url: URL(string: "https://example.com/")!, body: body)])
+
+    // two parts: nothing after the first, the reply after the second
+    let a = call(RPCMethod.httpRequest, [0, 2] + Array(payload.prefix(10)), id: 5)
+    let b = call(RPCMethod.httpRequest, [1, 2] + Array(payload.dropFirst(10)), id: 5)
+    #expect(await answer(a, package: "weather.app", host: h) == [])
+    #expect(await ask(h, b)?.0 == .ok)
+    #expect(h.calls.count == 2 && h.calls[1].body == body)
+    // a new id before the last part
+    #expect(await answer(a, package: "weather.app", host: h) == [])
+    #expect(await ask(h, call(RPCMethod.httpRequest, [1, 2] + Array(payload.dropFirst(10)), id: 6))?.0 == .badRequest)
+    #expect(await ask(h, b)?.0 == .badRequest, "the dropped request doesn't come back")
+    // parts are per package
+    #expect(await answer(a, package: "weather.app", host: h) == [])
+    #expect(await answer(a, package: "other.app", host: h) == [])
+    #expect(await ask(h, b)?.0 == .ok)
 }

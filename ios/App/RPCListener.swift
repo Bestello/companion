@@ -101,7 +101,8 @@ actor KLock {
         if apps[slot] == nil, let state = try? await KLock.shared.run({ try await readLoader(session) }) {
             apps = state.apps.mapValues(\.name)
         }
-        guard let out = await answer(message, package: apps[slot], host: PhoneServices.shared) else { return }
+        // empty: a part of http.request before its last
+        guard let out = await answer(message, package: apps[slot], host: PhoneServices.shared), !out.isEmpty else { return }
         // "R1Q id method …" in, "R1A id status index total" out
         let method = message.count > 4 ? DevLog.methods[message[message.startIndex + 4]] ?? "?" : "?"
         let status = out.first.flatMap { $0.count > 4 ? Int($0[$0.startIndex + 4]) : nil }
