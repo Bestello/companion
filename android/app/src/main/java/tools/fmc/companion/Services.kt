@@ -28,6 +28,7 @@ import tools.fmc.companion.wire.Event
 import tools.fmc.companion.wire.HTTP_BODY_MAX
 import tools.fmc.companion.wire.HttpCall
 import tools.fmc.companion.wire.KeyValueStore
+import tools.fmc.companion.wire.RefreshJob
 import tools.fmc.companion.wire.RpcState
 import tools.fmc.companion.wire.httpHost
 import tools.fmc.companion.wire.MediaAction
@@ -63,6 +64,8 @@ class PhoneServices(private val context: Context, private val grants: Grants) : 
     }
 
     override val state = RpcState(appStorage(context))
+    override fun saveJob(pkg: String, job: RefreshJob) = Jobs(context).save(pkg, job)
+    override fun deleteJob(pkg: String, id: Int) = Jobs(context).delete(pkg, id)
 
     override suspend fun call(pkg: String, method: Int, args: ByteArray): List<ByteArray> {
         val show = grants.showText(pkg)

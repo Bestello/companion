@@ -740,5 +740,79 @@
    },
    "hex": "010000feff08506f64636173747330412076657279206c6f6e6720657069736f6465207469746c65207468617420676f65732077656c6c2070617374207468536f6d652053686f7720576974682041204c6f6e67204e616d6520546f6f"
   }
+ ],
+ "jobs": [
+  {
+   "payload": "001e0000002268747470733a2f2f6170692e6578616d706c652e636f6d2f726174653f633d757364",
+   "job": {
+    "id": 0,
+    "minutes": 30,
+    "kind": 0,
+    "spec": "002268747470733a2f2f6170692e6578616d706c652e636f6d2f726174653f633d757364",
+    "cap": "http:api.example.com"
+   }
+  },
+  {
+   "payload": "0105000103",
+   "job": {
+    "id": 1,
+    "minutes": 15,
+    "kind": 1,
+    "spec": "03",
+    "cap": "weather"
+   },
+   "note": "minutes under 15 count as 15"
+  },
+  {
+   "payload": "03d00702000205",
+   "job": {
+    "id": 3,
+    "minutes": 1440,
+    "kind": 2,
+    "spec": "000205",
+    "cap": "calendar"
+   },
+   "note": "over a day counts as a day"
+  },
+  {
+   "payload": "023c0000011568747470733a2f2f6578616d706c652e636f6d2f777b2271223a317d",
+   "job": {
+    "id": 2,
+    "minutes": 60,
+    "kind": 0,
+    "spec": "011568747470733a2f2f6578616d706c652e636f6d2f777b2271223a317d",
+    "cap": "http:example.com"
+   }
+  },
+  {
+   "payload": "041e000103",
+   "bad": true,
+   "note": "job 4: four per package, 0-3"
+  },
+  {
+   "payload": "001e0003",
+   "bad": true,
+   "note": "kind 3"
+  },
+  {
+   "payload": "001e0001",
+   "bad": true,
+   "note": "weather without days"
+  },
+  {
+   "payload": "001e00020001",
+   "bad": true,
+   "note": "calendar args short"
+  },
+  {
+   "payload": "001e00000005687474703a",
+   "bad": true,
+   "note": "not an https request"
+  },
+  {
+   "payload": "0001",
+   "bad": true,
+   "note": "cut short"
+  }
  ]
 }

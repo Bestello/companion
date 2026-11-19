@@ -43,6 +43,9 @@ import WireKit
     /// ponytail: in memory, gone with the process; Keychain if apps need a login to outlive that.
     private var cookies: [String: [HTTPCookie]] = [:]
 
+    func saveJob(_ package: String, _ job: RefreshJob) { Jobs.shared.set(package, job) }
+    func deleteJob(_ package: String, _ id: Int) { Jobs.shared.delete(package, id) }
+
     func clearCookies(_ package: String) { cookies = cookies.filter { !$0.key.hasPrefix("\(package)|") } }
     func showText(_ package: String) -> Bool { Permissions.shared.showText(package) }
     let notificationsAvailable = false

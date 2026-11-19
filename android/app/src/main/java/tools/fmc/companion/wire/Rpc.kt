@@ -32,12 +32,14 @@ object Method {
     const val NOTIFY = 0x51
     const val MEDIA = 0x80
     const val MEDIA_CONTROL = 0x81
+    const val JOB_SET = 0x90
+    const val JOB_DELETE = 0x91
 
     /** No cap: in `caps` always, after the others. */
-    val FREE = listOf(STORAGE_GET, STORAGE_PUT, STORAGE_DELETE, BATTERY)
+    val FREE = listOf(STORAGE_GET, STORAGE_PUT, STORAGE_DELETE, BATTERY, JOB_SET, JOB_DELETE)
 
     /** Methods whose request comes in parts (`index ‖ total ‖ chunk`). */
-    val MULTI_PART = setOf(HTTP_REQUEST, STORAGE_PUT)
+    val MULTI_PART = setOf(HTTP_REQUEST, STORAGE_PUT, JOB_SET)
 }
 
 /** What the phone keeps between requests: the parts of a request not joined yet, and each package's store. */
@@ -276,6 +278,7 @@ fun capOf(method: Int, args: ByteArray): String? = when (method) {
     Method.BATTERY -> "" // no cap
     Method.NOTIFY -> parseAlert(args)?.let { "notify" }
     Method.MEDIA -> "media"
+    Method.JOB_SET -> parseJob(args)?.cap
     Method.MEDIA_CONTROL -> "media".takeIf { args.size == 1 && args.u8(0) <= MediaAction.PREVIOUS }
     else -> null
 }
@@ -292,6 +295,10 @@ interface Phone {
 
     /** Parts, stores: one per phone. */
     val state: RpcState
+
+    /** job.set: keeps it (replacing the package's job with that id) for the scheduler. */
+    fun saveJob(pkg: String, job: RefreshJob)
+    fun deleteJob(pkg: String, id: Int)
 
     /** The records of a granted call; `RpcError` for any other status. For http.request `args` is the joined
      *  payload. */
@@ -323,6 +330,11 @@ suspend fun answer(pkg: String, msg: ByteArray, phone: Phone, budgetMs: Long = 7
     } catch (e: RpcError) {
         replies(r.id, e.status)
     }
+    if (method == Method.JOB_DELETE) {
+        if (args.size != 1) return replies(r.id, RpcStatus.BAD_REQUEST)
+        phone.deleteJob(pkg, args.u8(0))
+        return replies(r.id, RpcStatus.OK)
+    }
     // iOS only: Android has no reminders API for other apps (docs/miniapp-rpc.md)
     if (method == Method.REMINDERS || method == Method.REMINDER_DONE) return replies(r.id, RpcStatus.UNAVAILABLE)
     val cap = capOf(method, args) ?: return replies(r.id, RpcStatus.BAD_REQUEST)
@@ -331,6 +343,7 @@ suspend fun answer(pkg: String, msg: ByteArray, phone: Phone, budgetMs: Long = 7
         false -> return replies(r.id, RpcStatus.DENIED)
         true -> if (!phone.osAllows(cap)) return replies(r.id, RpcStatus.DENIED)
     }
+    if (method == Method.JOB_SET) { phone.saveJob(pkg, parseJob(args)!!); return replies(r.id, RpcStatus.OK) }
     if (method == Method.NOTIFY && !phone.state.mayNotify(pkg)) return replies(r.id, RpcStatus.UNAVAILABLE)
     // not a child of the caller: a service stuck in blocking I/O must not hold the reply past the budget
     val run = CoroutineScope(Dispatchers.IO).async { runCatching { phone.call(pkg, method, args) } }
@@ -348,4 +361,53 @@ private fun storage(st: KeyValueStore, pkg: String, method: Int, args: ByteArray
         emptyList()
     }
     else -> { st.delete(pkg, storageKey(args)); emptyList() }
+}
+
+// background jobs
+
+/** What a job fetches: an http.request, the weather, the calendar. */
+object JobKind {
+    const val HTTP = 0
+    const val WEATHER = 1
+    const val CALENDAR = 2
+}
+
+/** A watch app's background refresh (job.set): every [minutes], the records of one request, for the app's widget or
+ *  page while it doesn't run. [on] is the user's switch; [last] ms. */
+data class RefreshJob(val id: Int, val minutes: Int, val kind: Int, val spec: ByteArray, val on: Boolean = true, val last: Long? = null) {
+    /** The cap its request needs, as the same request from the app would. */
+    val cap: String get() = when (kind) {
+        JobKind.HTTP -> "http:${parseHttpCall(spec)?.host.orEmpty()}"
+        JobKind.WEATHER -> "weather"
+        else -> "calendar"
+    }
+
+    /** The method whose records it delivers; [spec] is that method's args. */
+    val method get() = when (kind) { JobKind.HTTP -> Method.HTTP_REQUEST; JobKind.WEATHER -> Method.WEATHER; else -> Method.CALENDAR }
+
+    fun due(now: Long) = on && (last == null || now - last >= minutes * 60_000L)
+
+    override fun equals(other: Any?) = other is RefreshJob && id == other.id && minutes == other.minutes && kind == other.kind &&
+        spec.contentEquals(other.spec) && on == other.on && last == other.last
+    override fun hashCode() = id
+}
+
+/** `job:u8 ‖ minutes:u16 ‖ kind:u8 ‖ spec`: job 0-3, minutes clamped to 15..1440; spec http.request's joined payload
+ *  (kind 0), weather's `days` (1), calendar.events' args (2). null for anything else. */
+fun parseJob(d: ByteArray): RefreshJob? {
+    if (d.size < 4 || d.u8(0) > 3 || d.u8(3) > JobKind.CALENDAR) return null
+    val spec = d.copyOfRange(4, d.size)
+    val ok = when (d.u8(3)) {
+        JobKind.HTTP -> parseHttpCall(spec) != null
+        JobKind.WEATHER -> spec.size == 1
+        else -> spec.size == 3
+    }
+    if (!ok) return null
+    return RefreshJob(d.u8(0), d.le16(1).coerceIn(15, 1440), d.u8(3), spec)
+}
+
+/** A due job's records, as its request would answer them; DENIED once its cap is off. Never asks. */
+suspend fun runJob(pkg: String, job: RefreshJob, phone: Phone): List<ByteArray> {
+    if (phone.grants(pkg)[job.cap] != true || !phone.osAllows(job.cap)) throw RpcError(RpcStatus.DENIED)
+    return phone.call(pkg, job.method, job.spec)
 }

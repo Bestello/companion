@@ -83,6 +83,7 @@ actor KLock {
             _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
             DevLog.shared.log("listening")
             while up, !Task.isCancelled {
+                await runDueJobs(session)
                 guard let m = try? await session.recvFrom(timeout: .seconds(5)) else { continue }
                 await handle(m.data, slot: Int(m.slot), session)
             }
@@ -91,6 +92,32 @@ actor KLock {
             DevLog.shared.log("link: \(error.localizedDescription)")
         }
         return false
+    }
+
+    /// The watch apps' background jobs that are due, while the link is up: in the foreground and in the ~10 s a BLE
+    /// wake gives. ponytail: no BGAppRefreshTask; it wakes without the link, and delivering needs it.
+    private func runDueJobs(_ session: KSession) async {
+        let now = Date.now
+        for (package, jobs) in Jobs.shared.all {
+            for j in jobs where j.due(now) {
+                Jobs.shared.ran(package, j.id, at: now) // first: a failing job waits its interval
+                do {
+                    let records = try await withDeadline(.seconds(8)) { @MainActor in
+                        try await runJob(j, package: package, host: PhoneServices.shared)
+                    }
+                    await deliver(package, j, records, session)
+                } catch {
+                    DevLog.shared.log("\(package) job \(j.id): \(error)")
+                }
+            }
+        }
+    }
+
+    /// Writes a job's records to the app's widget or page data on the watch while the app doesn't run.
+    /// TODO(widget-push): over K as cmf-watch-sdk's widget-push doc says (branch app-order, not written yet); until
+    /// then the records are fetched and dropped.
+    private func deliver(_ package: String, _ job: RefreshJob, _ records: [Data], _ session: KSession) async {
+        DevLog.shared.log("\(package) job \(job.id): \(records.count) records, not delivered (the watch side isn't there yet)")
     }
 
     private func handle(_ message: Data, slot: Int, _ session: KSession) async {

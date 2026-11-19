@@ -620,6 +620,18 @@ struct AppView: View {
                     Text("Removes \(app.title) and its data from the watch, and forgets its permissions.")
                 }
             }
+            let jobs = Jobs.shared.of(name)
+            if !jobs.isEmpty {
+                Section {
+                    ForEach(jobs, id: \.id) { j in
+                        Toggle(Jobs.label(j), isOn: Binding(get: { j.on }, set: { Jobs.shared.setOn(name, j.id, $0) }))
+                    }
+                } header: {
+                    Text("Background refresh")
+                } footer: {
+                    Text("\(app.title) asked the phone to fetch these on its own, for its widget or page on the watch. They run while the phone is connected to the watch.")
+                }
+            }
             if caps.isEmpty {
                 Section {
                     Text("\(app.title) hasn't asked for anything on your phone.").foregroundStyle(.secondary)

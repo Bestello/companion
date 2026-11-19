@@ -15,6 +15,7 @@ import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
 import org.json.JSONArray
+import tools.fmc.companion.wire.RefreshJob
 
 // Who may call which miniapp service (docs/miniapp-rpc.md, "Permissions"). Keyed by the package name in the slot's
 // header. SharedPreferences "grants": "g|pkg|cap" = allowed, "p|pkg|cap" = asked at (ms, pending until answered),
@@ -23,6 +24,7 @@ import org.json.JSONArray
 class Grants(context: Context) {
     val prefs = context.getSharedPreferences("grants", Context.MODE_PRIVATE)!!
     private val secure = SecureStore(context)
+    private val jobs = Jobs(context)
 
     private fun parts(prefix: String) = prefs.all.keys.filter { it.startsWith(prefix) }
         .map { it.removePrefix(prefix).split("|", limit = 2) }.filter { it.size == 2 }.map { it[0] to it[1] }
@@ -44,6 +46,7 @@ class Grants(context: Context) {
     fun reset(pkg: String) {
         caps(pkg).filter { it.startsWith("http:") }.forEach { secure["h|$pkg|${it.removePrefix("http:")}"] = null }
         Cookies.clear(pkg)
+        jobs.clear(pkg)
         val e = prefs.edit()
         prefs.all.keys.filter { it.startsWith("g|$pkg|") || it.startsWith("p|$pkg|") || it == "show|$pkg" }.forEach { e.remove(it) }
         e.apply()
@@ -181,4 +184,49 @@ fun postAlert(context: Context, pkg: String, a: tools.fmc.companion.wire.PhoneAl
         .build()
     if (a.find) n.flags = n.flags or android.app.Notification.FLAG_INSISTENT
     nm.notify("notify|$pkg|${System.nanoTime()}".hashCode(), n)
+}
+
+/** Watch apps' background jobs (job.set), per package: prefs "jobs", "pkg" = JSON array. Not secret: an http job's
+ *  URL and body are what the app sent; the headers stay in SecureStore. */
+class Jobs(context: Context) {
+    private val prefs = context.getSharedPreferences("jobs", Context.MODE_PRIVATE)
+
+    fun of(pkg: String): List<RefreshJob> = runCatching {
+        val a = JSONArray(prefs.getString(pkg, "[]"))
+        (0 until a.length()).map(a::getJSONObject).map {
+            RefreshJob(it.getInt("id"), it.getInt("minutes"), it.getInt("kind"), tools.fmc.companion.wire.hex(it.getString("spec")),
+                it.optBoolean("on", true), if (it.has("last")) it.getLong("last") else null)
+        }
+    }.getOrDefault(emptyList())
+
+    fun all(): Map<String, List<RefreshJob>> = prefs.all.keys.associateWith(::of)
+
+    private fun put(pkg: String, list: List<RefreshJob>) = prefs.edit().apply {
+        if (list.isEmpty()) remove(pkg) else putString(pkg, JSONArray(list.map { j ->
+            org.json.JSONObject().put("id", j.id).put("minutes", j.minutes).put("kind", j.kind).put("spec", j.spec.joinToString("") { "%02x".format(it) })
+                .put("on", j.on).apply { j.last?.let { put("last", it) } }
+        }).toString())
+    }.apply()
+
+    /** A new job with that id replaces the old one and runs soon; the user's switch stays as it was. */
+    @Synchronized fun save(pkg: String, job: RefreshJob) {
+        val old = of(pkg)
+        put(pkg, old.filter { it.id != job.id } + job.copy(on = old.firstOrNull { it.id == job.id }?.on ?: true, last = null))
+    }
+
+    @Synchronized fun delete(pkg: String, id: Int) = put(pkg, of(pkg).filter { it.id != id })
+    @Synchronized fun setOn(pkg: String, id: Int, on: Boolean) = put(pkg, of(pkg).map { if (it.id == id) it.copy(on = on) else it })
+    @Synchronized fun ran(pkg: String, id: Int, at: Long) = put(pkg, of(pkg).map { if (it.id == id) it.copy(last = at) else it })
+    fun clear(pkg: String) = prefs.edit().remove(pkg).apply()
+}
+
+/** "Every 30 min: GET api.example.com/rate" */
+fun jobLabel(j: RefreshJob): String {
+    val what = when (j.kind) {
+        tools.fmc.companion.wire.JobKind.HTTP -> tools.fmc.companion.wire.parseHttpCall(j.spec)
+            ?.let { "${it.method} ${it.url.removePrefix("https://")}" } ?: "Web request"
+        tools.fmc.companion.wire.JobKind.WEATHER -> "Weather"
+        else -> "Calendar"
+    }
+    return "Every ${if (j.minutes % 60 == 0) "${j.minutes / 60} h" else "${j.minutes} min"}: $what"
 }

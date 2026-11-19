@@ -15,10 +15,11 @@ public enum RPCMethod {
     public static let storageGet: UInt8 = 0x60, storagePut: UInt8 = 0x61, storageDelete: UInt8 = 0x62
     public static let battery: UInt8 = 0x70, notify: UInt8 = 0x51
     public static let media: UInt8 = 0x80, mediaControl: UInt8 = 0x81
+    public static let jobSet: UInt8 = 0x90, jobDelete: UInt8 = 0x91
     /// No cap: in `caps` always, after the others.
-    public static let free: [UInt8] = [storageGet, storagePut, storageDelete, battery]
+    public static let free: [UInt8] = [storageGet, storagePut, storageDelete, battery, jobSet, jobDelete]
     /// Methods whose request comes in parts (`index ‖ total ‖ chunk`).
-    public static let multiPart: Set<UInt8> = [httpRequest, storagePut]
+    public static let multiPart: Set<UInt8> = [httpRequest, storagePut, jobSet]
 }
 
 /// What the phone keeps between requests: the parts of a request not joined yet, and each package's store.
@@ -372,6 +373,9 @@ public func notificationRecord(_ n: PhoneNotification, show: Bool) -> Data {
     func reminders() async throws -> [PhoneReminder]
     /// Marks the reminder with this (full) id complete.
     func completeReminder(_ id: String) async throws
+    /// job.set: keeps it (replacing the package's job with that id) for the scheduler.
+    func saveJob(_ package: String, _ job: RefreshJob)
+    func deleteJob(_ package: String, _ id: Int)
 }
 
 /// The reply messages to one message from the app in `package`'s slot; nil when it is not a request.
@@ -477,6 +481,16 @@ public func answer(_ message: Data, package: String?, host: any RPCHost,
     case RPCMethod.storageDelete:
         host.state.storage.delete(package, try storageKey(args))
         return []
+    case RPCMethod.jobSet:
+        guard let joined = try host.state.parts.add(package, id: id, method: method, args: args) else { return nil }
+        guard let job = parseJob(joined) else { throw RPCStatus.badRequest }
+        try permit(job.cap)
+        host.saveJob(package, job)
+        return []
+    case RPCMethod.jobDelete:
+        guard a.count == 1 else { throw RPCStatus.badRequest }
+        host.deleteJob(package, Int(a[0]))
+        return []
     case RPCMethod.media, RPCMethod.mediaControl:
         // iOS can't read or drive other apps' players (docs/miniapp-rpc.md)
         throw RPCStatus.unavailable
@@ -499,6 +513,60 @@ public func answer(_ message: Data, package: String?, host: any RPCHost,
         }
     default:
         throw RPCStatus.badRequest
+    }
+}
+
+// MARK: background jobs
+
+/// What a job fetches: an http.request, the weather, the calendar.
+public enum JobKind: Int, Codable, Sendable { case http = 0, weather, calendar }
+
+/// A watch app's background refresh (job.set): every `minutes`, the records of one request, for the app's widget or
+/// page while it doesn't run.
+public struct RefreshJob: Codable, Equatable, Sendable {
+    public var id: Int, minutes: Int, kind: JobKind, spec: Data
+    /// The user's switch on the app's page.
+    public var on = true
+    public var last: Date?
+
+    public init(id: Int, minutes: Int, kind: JobKind, spec: Data) { (self.id, self.minutes, self.kind, self.spec) = (id, minutes, kind, spec) }
+
+    /// The cap its request needs, as the same request from the app would.
+    public var cap: String {
+        switch kind {
+        case .http: "http:\(parseHTTPCall(spec)?.host ?? "")"
+        case .weather: "weather"
+        case .calendar: "calendar"
+        }
+    }
+
+    public func due(_ now: Date) -> Bool { on && last.map { now.timeIntervalSince($0) >= Double(minutes * 60) } ?? on }
+}
+
+/// `job:u8 ‖ minutes:u16 ‖ kind:u8 ‖ spec`: job 0–3, minutes clamped to 15…1440; spec http.request's joined payload
+/// (kind 0), weather's `days` (1), calendar.events' args (2). nil for anything else.
+public func parseJob(_ d: Data) -> RefreshJob? {
+    let b = [UInt8](d)
+    guard b.count >= 4, b[0] < 4, let kind = JobKind(rawValue: Int(b[3])) else { return nil }
+    let spec = Data(b[4...])
+    switch kind {
+    case .http: guard parseHTTPCall(spec) != nil else { return nil }
+    case .weather: guard spec.count == 1 else { return nil }
+    case .calendar: guard spec.count == 3 else { return nil }
+    }
+    return RefreshJob(id: Int(b[0]), minutes: min(max(Int(d.le(UInt16.self, at: 1)), 15), 1440), kind: kind, spec: spec)
+}
+
+/// A due job's records, as its request would answer them; DENIED once its cap is off. Never asks.
+@MainActor public func runJob(_ job: RefreshJob, package: String, host: any RPCHost) async throws -> [Data] {
+    guard host.grants(package)[job.cap] == true, host.osAllowed(job.cap) else { throw RPCStatus.denied }
+    switch job.kind {
+    case .http:
+        guard let call = parseHTTPCall(job.spec) else { throw RPCStatus.badRequest }
+        let r = try await host.http(call, package: package)
+        return try httpRecords(code: r.code, body: r.body)
+    case .weather: return try await run(0, RPCMethod.weather, job.spec, package: package, host: host) ?? []
+    case .calendar: return try await run(0, RPCMethod.calendar, job.spec, package: package, host: host) ?? []
     }
 }
 

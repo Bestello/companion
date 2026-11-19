@@ -535,6 +535,20 @@ fun AppScreen(model: AppModel, value: String, open: (String) -> Unit, back: () -
                     if (confirm) DeleteDialog(app, { confirm = false }) { scope.launch { AppUpdates.remove(context, model, name, slot) } }
                 }
             }
+            item {
+                // background jobs: the app's own refreshes, each with a switch
+                var jobs by remember { mutableStateOf(Jobs(context).of(name)) }
+                if (jobs.isNotEmpty()) Section("Background refresh",
+                    footer = "${app.title} asked the phone to fetch these on its own, for its widget or page on the watch. They run while the phone is connected to the watch.") {
+                    jobs.forEachIndexed { i, j ->
+                        if (i > 0) HorizontalDivider()
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(jobLabel(j), Modifier.weight(1f))
+                            Switch(j.on, { on -> Jobs(context).setOn(name, j.id, on); jobs = Jobs(context).of(name) })
+                        }
+                    }
+                }
+            }
             if (caps.isEmpty()) item {
                 Section { Text("${app.title} hasn't asked for anything on your phone.", color = Fmc.secondary) }
             } else {

@@ -76,6 +76,11 @@ struct RPCVectors: Decodable {
         let `in`: In; let hex: String
     }
     let media: [Media]
+    struct Job: Decodable {
+        struct J: Decodable { let id: Int; let minutes: Int; let kind: Int; let spec: String; let cap: String }
+        let payload: String; let job: J?; let bad: Bool?; let note: String?
+    }
+    let jobs: [Job]
     let notifications: [Notif]
     let replies: [Reply]
 
@@ -252,6 +257,9 @@ private let rv = RPCVectors.shared
     var todo: [PhoneReminder] = []
     func reminders() async throws -> [PhoneReminder] { todo }
     func completeReminder(_ id: String) async throws { todo.removeAll { $0.id == id } }
+    var jobs: [String: [RefreshJob]] = [:]
+    func saveJob(_ package: String, _ job: RefreshJob) { jobs[package, default: []].removeAll { $0.id == job.id }; jobs[package]!.append(job) }
+    func deleteJob(_ package: String, _ id: Int) { jobs[package]?.removeAll { $0.id == id } }
 }
 
 private func call(_ method: UInt8, _ args: [UInt8] = [], id: UInt8 = 1) -> Data {
@@ -452,4 +460,36 @@ let storageIDs = Data(RPCMethod.free)
     #expect(await ask(h, call(RPCMethod.media))?.0 == .unavailable, "iOS has no other apps' players")
     #expect(await ask(h, call(RPCMethod.mediaControl, [2]))?.0 == .unavailable)
     #expect(h.asked.isEmpty)
+}
+
+@Test @MainActor func rpcJobs() async throws {
+    for c in rv.jobs {
+        let got = parseJob(hex(c.payload))
+        if c.bad == true { #expect(got == nil, "\(c.note ?? c.payload)") } else {
+            let j = c.job!
+            #expect(got == RefreshJob(id: j.id, minutes: j.minutes, kind: JobKind(rawValue: j.kind)!, spec: hex(j.spec)), "\(c.payload)")
+            #expect(got?.cap == j.cap)
+        }
+    }
+    var j = RefreshJob(id: 0, minutes: 15, kind: .weather, spec: Data([3]))
+    let t0 = Date(timeIntervalSince1970: 1000)
+    #expect(j.due(t0), "never run: due")
+    j.last = t0
+    #expect(!j.due(t0 + 14 * 60) && j.due(t0 + 15 * 60))
+    j.on = false
+    #expect(!j.due(t0 + 3600), "switched off")
+
+    let h = FakeHost()
+    let set = call(RPCMethod.jobSet, [0, 1] + Array(hex(rv.jobs[0].payload)), id: 3)
+    #expect(await ask(h, set)?.0 == .ask, "the job asks for its cap")
+    #expect(h.asked == ["weather.app http:api.example.com"])
+    h.given["weather.app"] = ["http:api.example.com": true, "weather": true]
+    #expect(await ask(h, set)?.0 == .ok)
+    let job = try #require(h.jobs["weather.app"]?.first)
+    #expect(try await runJob(job, package: "weather.app", host: h) == [Data([200, 0, 2, 0]), Data("ok".utf8)])
+    #expect(try await runJob(RefreshJob(id: 1, minutes: 15, kind: .weather, spec: Data([2])), package: "weather.app", host: h).count == 3)
+    h.given["weather.app"] = ["weather": true]
+    await #expect(throws: RPCStatus.denied) { try await runJob(job, package: "weather.app", host: h) }
+    #expect(await ask(h, call(RPCMethod.jobDelete, [0]))?.0 == .ok)
+    #expect(h.jobs["weather.app"] == [])
 }

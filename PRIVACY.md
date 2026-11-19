@@ -14,6 +14,10 @@ It counts anonymous usage events (see below).
   with FMC Companion forgets them.
 - **Notifications from watch apps.** A watch app you allow can show a notification on the phone with its own text.
   It's posted locally and not sent anywhere.
+- **Background refresh for watch apps.** A watch app can ask the phone to repeat one of its requests on a schedule
+  (a web request to a host you allowed, the weather, your calendar) so its widget is fresh. The list is on the app's
+  page with a switch each; Reset permissions or deleting the app removes them. The web requests leave the phone as
+  described below.
 - **Data watch apps keep on the phone.** A watch app can store up to 64 KiB of its own data on the phone. It stays
   in the app's files on the phone, isn't backed up, and goes when you delete the app from the watch with FMC
   Companion.

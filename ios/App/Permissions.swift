@@ -58,6 +58,7 @@ import WireKit
     func reset(_ package: String) {
         for cap in caps(package) where cap.hasPrefix("http:") { setHeaders(package, String(cap.dropFirst(5)), []) }
         PhoneServices.shared.clearCookies(package)
+        Jobs.shared.clear(package)
         store.grants[package] = nil
         store.asked[package] = nil
         store.showText.remove(package)
@@ -112,5 +113,56 @@ import WireKit
         case "notify": String(localized: "to send you notifications")
         default: cap.hasPrefix("http:") ? String(localized: "the web: \(String(cap.dropFirst(5)))") : cap
         }
+    }
+}
+
+/// Watch apps' background jobs (job.set), per package, in UserDefaults. Not secret: an http job's URL and body are
+/// what the app sent; the headers stay in the Keychain.
+@MainActor @Observable final class Jobs {
+    static let shared = Jobs()
+    private static let key = "rpc-jobs"
+    private(set) var all: [String: [RefreshJob]]
+
+    private init() {
+        all = UserDefaults.standard.data(forKey: Self.key).flatMap { try? JSONDecoder().decode([String: [RefreshJob]].self, from: $0) } ?? [:]
+    }
+
+    private func save() { UserDefaults.standard.set(try? JSONEncoder().encode(all), forKey: Self.key) }
+
+    func of(_ package: String) -> [RefreshJob] { (all[package] ?? []).sorted { $0.id < $1.id } }
+
+    /// A new job with that id replaces the old one and runs soon; the user's switch stays as it was.
+    func set(_ package: String, _ job: RefreshJob) {
+        var j = job
+        j.on = all[package]?.first { $0.id == job.id }?.on ?? true
+        j.last = nil
+        all[package] = (all[package] ?? []).filter { $0.id != job.id } + [j]
+        save()
+    }
+
+    func delete(_ package: String, _ id: Int) { all[package]?.removeAll { $0.id == id }; save() }
+    func clear(_ package: String) { all[package] = nil; save() }
+
+    func setOn(_ package: String, _ id: Int, _ on: Bool) {
+        guard let i = all[package]?.firstIndex(where: { $0.id == id }) else { return }
+        all[package]![i].on = on
+        save()
+    }
+
+    func ran(_ package: String, _ id: Int, at: Date) {
+        guard let i = all[package]?.firstIndex(where: { $0.id == id }) else { return }
+        all[package]![i].last = at
+        save()
+    }
+
+    /// "Every 30 min: GET api.example.com/rate"
+    static func label(_ j: RefreshJob) -> String {
+        let what = switch j.kind {
+        case .http: parseHTTPCall(j.spec).map { "\($0.method) \($0.url.absoluteString.replacingOccurrences(of: "https://", with: ""))" } ?? String(localized: "Web request")
+        case .weather: String(localized: "Weather")
+        case .calendar: String(localized: "Calendar")
+        }
+        let every = j.minutes % 60 == 0 ? String(localized: "\(j.minutes / 60) h") : String(localized: "\(j.minutes) min")
+        return String(localized: "Every \(every): \(what)")
     }
 }

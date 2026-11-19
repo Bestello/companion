@@ -135,6 +135,9 @@ class RpcTest {
         var slow = false
         override fun grants(pkg: String) = grants
         override fun osAllows(cap: String) = os
+        val jobs = mutableMapOf<String, MutableList<RefreshJob>>()
+        override fun saveJob(pkg: String, job: RefreshJob) { jobs.getOrPut(pkg) { mutableListOf() }.apply { removeAll { it.id == job.id }; add(job) } }
+        override fun deleteJob(pkg: String, id: Int) { jobs[pkg]?.removeAll { it.id == id } }
         override fun ask(pkg: String, cap: String, write: Boolean) { asked += "$pkg $cap"; writes += write }
         override suspend fun call(pkg: String, method: Int, args: ByteArray): List<ByteArray> {
             if (slow) delay(10_000)
@@ -163,7 +166,7 @@ class RpcTest {
         assertEquals(RpcStatus.BAD_REQUEST, status(answer("a", hex("5231510110"), p)), "calendar without args")
         assertNull(answer("a", hex("5231500100"), p))
         p.grants["http:example.com"] = true
-        assertEquals("5231410700000110404160616270", answer("a", hex("5231510701"), p)!!.single().hex(), "caps")
+        assertEquals("52314107000001104041606162709091", answer("a", hex("5231510701"), p)!!.single().hex(), "caps")
         p.slow = true
         val t0 = System.currentTimeMillis()
         assertEquals(RpcStatus.UNAVAILABLE, status(answer("a", cal, p, budgetMs = 300)))
@@ -300,5 +303,34 @@ class RpcTest {
         p.grants["media"] = true
         assertEquals(RpcStatus.OK, status(answer("a", hex("523151018102"), p)))
         assertEquals(RpcStatus.BAD_REQUEST, status(answer("a", hex("523151018105"), p)), "no action 5")
+    }
+
+    @Test fun jobs() = runBlocking {
+        each("jobs") { t ->
+            val got = parseJob(hex(t.getString("payload")))
+            if (t.optBoolean("bad")) assertNull(got, t.optString("note")) else {
+                val j = t.getJSONObject("job")
+                assertEquals(RefreshJob(j.getInt("id"), j.getInt("minutes"), j.getInt("kind"), hex(j.getString("spec"))), got)
+                assertEquals(j.getString("cap"), got!!.cap)
+            }
+        }
+        val j = RefreshJob(0, 15, JobKind.WEATHER, bytes(3))
+        assert(j.due(0)) { "never run: due" }
+        assert(!j.copy(last = 1000).due(1000 + 14 * 60_000) && j.copy(last = 1000).due(1000 + 15 * 60_000))
+        assert(!j.copy(on = false).due(0)) { "switched off" }
+
+        val p = FakePhone()
+        val set = "R1Q".toByteArray() + byteArrayOf(3, 0x90.toByte(), 0, 1) + hex(v.getJSONArray("jobs").getJSONObject(0).getString("payload"))
+        assertEquals(RpcStatus.ASK, status(answer("a", set, p)))
+        assertEquals(listOf("a http:api.example.com"), p.asked)
+        p.grants["http:api.example.com"] = true
+        assertEquals(RpcStatus.OK, status(answer("a", set, p)))
+        val job = p.jobs["a"]!!.single()
+        assertEquals(listOf(bytes(Method.HTTP_REQUEST).hex()), runJob("a", job, p).map { it.hex() })
+        assertEquals(job.spec.hex(), p.calls.last().second.hex(), "the job's spec goes as the method's args")
+        p.grants["http:api.example.com"] = false
+        assertEquals(RpcStatus.DENIED, (runCatching { runJob("a", job, p) }.exceptionOrNull() as RpcError).status)
+        assertEquals(RpcStatus.OK, status(answer("a", hex("523151049100"), p)))
+        assertEquals(0, p.jobs["a"]?.size)
     }
 }

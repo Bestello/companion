@@ -23,7 +23,12 @@ import tools.fmc.companion.wire.Cmd
 import tools.fmc.companion.wire.KSession
 import tools.fmc.companion.wire.Status
 import tools.fmc.companion.wire.WireError
+import kotlinx.coroutines.withTimeoutOrNull
+import tools.fmc.companion.wire.RefreshJob
+import tools.fmc.companion.wire.RpcError
+import tools.fmc.companion.wire.RpcStatus
 import tools.fmc.companion.wire.answer
+import tools.fmc.companion.wire.runJob
 import tools.fmc.companion.wire.bytes
 import tools.fmc.companion.wire.parseHeader
 import tools.fmc.companion.wire.parseRequest
@@ -100,6 +105,7 @@ class RpcService : Service() {
         // an app installed into a used slot while this runs keeps the old name until the next reconnect.
         val names = mutableMapOf<Int, String>()
         while (true) {
+            runDueJobs(s, phone)
             val (slot, m) = try {
                 s.recvFrom(60_000)
             } catch (_: WireError.Timeout) {
@@ -119,6 +125,34 @@ class RpcService : Service() {
                 DevLog.log(this, "$line, send failed: ${e.message}")
             }
         }
+    }
+
+    /** The watch apps' background jobs that are due, while the link is up (checked at least once a minute). */
+    private suspend fun runDueJobs(s: KSession, phone: PhoneServices) {
+        val jobs = Jobs(this)
+        val now = System.currentTimeMillis()
+        for ((pkg, list) in jobs.all()) for (j in list.filter { it.due(now) }) {
+            jobs.ran(pkg, j.id, now) // first: a failing job waits its interval, not the next loop
+            val records = try {
+                withTimeoutOrNull(10_000) { runJob(pkg, j, phone) } ?: throw RpcError(RpcStatus.UNAVAILABLE)
+            } catch (e: RpcError) {
+                DevLog.log(this, "$pkg job ${j.id}: status ${e.status}")
+                continue
+            } catch (e: Exception) {
+                DevLog.log(this, "$pkg job ${j.id}: ${e.message}")
+                continue
+            }
+            deliverJob(s, pkg, j, records)
+        }
+    }
+
+    /**
+     * Writes a job's records to the app's widget or page data on the watch while the app doesn't run.
+     * TODO(widget-push): over K as cmf-watch-sdk's widget-push doc says (branch app-order, not written yet); until
+     * then the records are fetched and dropped.
+     */
+    private suspend fun deliverJob(s: KSession, pkg: String, job: RefreshJob, records: List<ByteArray>) {
+        DevLog.log(this, "$pkg job ${job.id}: ${records.size} records, not delivered (the watch side isn't there yet)")
     }
 
     private suspend fun packageIn(s: KSession, slot: Int): String? {

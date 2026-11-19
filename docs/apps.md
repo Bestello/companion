@@ -47,6 +47,20 @@ feature) can't carry the order: it stays on the phone.
 The stub has 8 app slots before version 7 and 16 from it (`appSlots(stub:)` in WireKit, `appSlots` in the Android
 wire). The version is INFO on slot `0xFE`; `readLoader`, `installed` and `install` read that many.
 
+## What the phone keeps for watch apps
+
+- Grants, pending asks and "Show text on the watch": `Permissions` (UserDefaults) / `Grants` (prefs "grants").
+- Headers per (package, host): Keychain / SecureStore. Cookies: in memory. Both go with Reset permissions.
+- `storage` (0x60–0x62): one file per key, iOS `Application Support/storage` excluded from backup, Android
+  `noBackupFilesDir/storage`; `KeyValueStore` in WireKit and the wire. Delete from the Watch clears it, Reset
+  permissions doesn't (it is the app's data, not an answer of the user's).
+- Background jobs (0x90): `Jobs` (UserDefaults "rpc-jobs" / prefs "jobs"), run by `RPCListener` / `RpcService` while
+  the link is up. Reset permissions and Delete from the Watch clear them. Delivering to the watch is a TODO
+  (`deliver` / `deliverJob`) until cmf-watch-sdk has its widget-push doc.
+
+What one platform can't do answers `UNAVAILABLE` there and stays out of `caps`: notifications, media on iOS,
+reminders on Android. Details per method in [miniapp-rpc.md](miniapp-rpc.md).
+
 ## One link, several sessions
 
 There's one BLE link, the one Nothing X holds, but more than one client can use it. Android shares the LE link between

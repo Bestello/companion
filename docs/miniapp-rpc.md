@@ -40,7 +40,7 @@ Capabilities:
 
 | Cap | Methods | OS permission |
 |---|---|---|
-| (none) | `caps`, `storage.*`, `phone.battery` | — |
+| (none) | `caps`, `storage.*`, `phone.battery`, `job.*` (a job needs the cap of its request) | — |
 | `calendar` | `calendar.events` | EventKit full access (iOS 17+ `requestFullAccessToEvents`); `READ_CALENDAR` |
 | `reminders` | `reminders`, `reminders.complete` | iOS: EventKit full access to reminders (`requestFullAccessToReminders`). Android: none, the methods answer `UNAVAILABLE` |
 | `location` | `location` | When In Use, reduced accuracy is enough; `ACCESS_COARSE_LOCATION` |
@@ -88,7 +88,7 @@ Reply (phone → watch):
   `KSession.send` (it retries `FULL`/`PAUSED`), so the app drains `recv` in its loop.
 - Empty result or any error: one message, `index` 0, `total` 0, no record.
 - The phone handles one request at a time, in order of arrival, and keeps no state per request, except the parts of
-  a multi-part request (`http.request`, `storage.put`) not joined yet: one per package, whatever its method.
+  a multi-part request (`http.request`, `storage.put`, `job.set`) not joined yet: one per package, whatever its method.
 
 ### Multi-part requests
 
@@ -135,11 +135,13 @@ Characters the watch has no glyph for stay as they are (they draw as `?`).
 | `0x70` | `phone.battery` | — |
 | `0x80` | `media.now_playing` | `media` |
 | `0x81` | `media.control` | `media` |
+| `0x90` | `job.set` | the cap of its request |
+| `0x91` | `job.delete` | — |
 
 ### `0x01 caps`
 
 Args: none. One record: the method ids this package may call now (granted and OS permission on), one byte each,
-without `0x01` itself; `0x40` and `0x41` when any host is granted; the methods without a cap (`0x60`–`0x62`, `0x70`) always,
+without `0x01` itself; `0x40` and `0x41` when any host is granted; the methods without a cap of their own (`0x60`–`0x62`, `0x70`, `0x90`, `0x91`) always,
 after the others.
 A miniapp calls it at start to tell "allow on your phone" from an empty result.
 
@@ -317,6 +319,39 @@ label ≤ 24 bytes, `title` ≤ 48, `artist` ≤ 32. Track names are not behind 
 
 `media.control`: args `action:u8`: 0 play, 1 pause, 2 play/pause, 3 next, 4 previous; other values `BAD_REQUEST`.
 `OK`, no records; no session: `UNAVAILABLE`.
+
+### `0x90 job.set`, `0x91 job.delete`
+
+Background refresh for a widget or page: the app registers a job, and the phone runs its request every N minutes
+while the app isn't running, then writes the records to the watch for it. The write to the watch is the SDK's
+(cmf-watch-sdk, the widget-push doc, not written yet); until it exists the phone runs the jobs and drops the records.
+
+`job.set`: a multi-part request; joined payload (`jobs` vectors):
+
+```
+job:u8 ‖ minutes:u16 ‖ kind:u8 ‖ spec
+```
+
+| Field | |
+|---|---|
+| `job` | 0–3: up to four jobs per package; a job with the same number replaces the old one |
+| `minutes` | how often; under 15 counts as 15, over 1440 as 1440 |
+| `kind` | 0 a web request: `spec` is `http.request`'s joined payload (`method ‖ url_len ‖ url ‖ body`); 1 the weather: `spec` is `weather`'s args (`days`); 2 the calendar: `spec` is `calendar.events`' args |
+
+Anything else is `BAD_REQUEST`. The job needs the cap its request would (`http:<host>`, `weather`, `calendar`): no
+answer yet is `ASK`, denied is `DENIED`, as for the request itself. `OK`, no records. A job's records are exactly
+what its request answers (an http job: `code ‖ length`, then the body), with the user's headers and cookies for that
+host and "Show text on the watch" as set. A job whose cap is off later doesn't run.
+
+`job.delete`: args `job:u8`. `OK`, no records, also for a number with no job.
+
+The app's page lists its jobs ("Every 30 min: GET api.example.com/rate") with a switch each. Reset permissions and
+Delete from the Watch delete them.
+
+When they run: on Android in the foreground service's loop (`RpcService`, at least once a minute); on iOS in
+`RPCListener`'s loop, while the app is in the foreground or woken by BLE (about 10 s). iOS has no BGAppRefreshTask
+for them: it wakes the app without the watch's link, and delivering needs that link. A job is due `minutes` after
+its last run (success or not); a new or replaced job runs on the next check.
 
 ### `0x70 phone.battery`
 
