@@ -740,7 +740,7 @@ private struct InfoStrip: View {
                 cell("DOWNLOADS", listing.downloads.formatted(.number.notation(.compactName)), "arrow.down.circle")
                 if !listing.version.isEmpty { cell("VERSION", listing.version, nil) }
                 if !listing.author.isEmpty { cell("DEVELOPER", nil, "person.crop.square", caption: listing.author) }
-                if let slot = app.slot { cell("SLOT", "\(slot)", nil, caption: "on the watch") }
+                if let slot = app.slot { cell("SLOT", "\(slot)", nil, caption: String(localized: "on the watch")) }
                 if let date = updated { cell("UPDATED", nil, "calendar", caption: date.formatted(.relative(presentation: .named))) }
             }
             .padding(.horizontal, 12)

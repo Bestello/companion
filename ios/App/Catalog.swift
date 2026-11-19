@@ -353,7 +353,7 @@ struct CatalogQuery: Hashable {
     private static func data(_ r: URLRequest) async throws -> Data {
         let (data, response) = try await URLSession.shared.data(for: r)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(status) else { throw AccountError.server(status, "Catalog request failed (\(status))") }
+        guard (200..<300).contains(status) else { throw AccountError.server(status, String(localized: "Catalog request failed (\(status))")) }
         return data
     }
 

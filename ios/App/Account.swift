@@ -103,7 +103,7 @@ struct OAuthProvider: Decodable, Identifiable {
                     struct Connect: Decodable { var clientId: String }
                     clientId = try JSONDecoder().decode(Connect.self, from: data).clientId
                     try await subscribe(clientId)
-                    guard let url = provider.url(state: clientId) else { throw AccountError.server(0, "Bad provider URL") }
+                    guard let url = provider.url(state: clientId) else { throw AccountError.server(0, String(localized: "Bad provider URL")) }
                     let s = ASWebAuthenticationSession(url: url, callbackURLScheme: nil) { _, error in
                         if error != nil { stream.cancel() } // closed by the user
                     }
@@ -115,7 +115,7 @@ struct OAuthProvider: Decodable, Identifiable {
                     let r = try JSONDecoder().decode(Reply.self, from: data)
                     guard r.state == clientId else { continue }
                     guard let code = r.code, !code.isEmpty else {
-                        throw AccountError.server(0, r.error.map { "\(provider.displayName): \($0)" } ?? "Sign-in failed")
+                        throw AccountError.server(0, r.error.map { "\(provider.displayName): \($0)" } ?? String(localized: "Sign-in failed"))
                     }
                     web?.cancel()
                     try await auth("auth-with-oauth2", body: ["provider": provider.name, "code": code,
@@ -182,7 +182,7 @@ struct OAuthProvider: Decodable, Identifiable {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard !(200..<300).contains(status) else { return }
         let message = (try? JSONDecoder().decode(PBError.self, from: data))?.message
-        throw AccountError.server(status, message ?? "Request failed (\(status))")
+        throw AccountError.server(status, message ?? String(localized: "Request failed (\(status))"))
     }
 }
 

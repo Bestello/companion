@@ -13,12 +13,12 @@ enum FaceInstallError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .refused(.aodWithoutPreview):
-            "The always-on screen of this face has no thumbnail. Faces like this made the screen flash on a watch. Open it in the editor on fmc.tools and install it from there."
+            String(localized: "The always-on screen of this face has no thumbnail. Faces like this made the screen flash on a watch. Open it in the editor on fmc.tools and install it from there.")
         case .refused(.imageTooBig(let w, let h)):
-            "An image of this face is \(w)×\(h) px. Over \(maxImageSide) px can make the watch restart in a loop."
-        case .refused: "This file is not a watch face."
-        case .full: "The watch is full. Delete a face on the watch (long press the face, swipe one up) and try again."
-        case .noFile: "This watch face has no file."
+            String(localized: "An image of this face is \(w)×\(h) px. Over \(maxImageSide) px can make the watch restart in a loop.")
+        case .refused: String(localized: "This file is not a watch face.")
+        case .full: String(localized: "The watch is full. Delete a face on the watch (long press the face, swipe one up) and try again.")
+        case .noFile: String(localized: "This watch face has no file.")
         }
     }
 }

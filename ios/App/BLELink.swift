@@ -10,10 +10,10 @@ enum BLEError: LocalizedError {
     case off, unauthorized, noWatch, missing, failed(String)
     var errorDescription: String? {
         switch self {
-        case .off: "Bluetooth is off."
-        case .unauthorized: "FMC Companion may not use Bluetooth. Allow it in Settings."
-        case .noWatch: "No watch connected. Open Nothing X and make sure the watch is connected."
-        case .missing: "This watch does not offer the expected services."
+        case .off: String(localized: "Bluetooth is off.")
+        case .unauthorized: String(localized: "FMC Companion may not use Bluetooth. Allow it in Settings.")
+        case .noWatch: String(localized: "No watch connected. Open Nothing X and make sure the watch is connected.")
+        case .missing: String(localized: "This watch does not offer the expected services.")
         case .failed(let m): m
         }
     }
@@ -77,7 +77,7 @@ final class BLELink: NSObject, Link, @unchecked Sendable {
 
     /// Ends a step that never finished (the watch went quiet).
     @MainActor func abort() {
-        finish(BLEError.failed("The watch did not answer."))
+        finish(BLEError.failed(String(localized: "The watch did not answer.")))
         disconnect()
     }
 
@@ -143,7 +143,7 @@ extension BLELink: CBCentralManagerDelegate, CBPeripheralDelegate {
     }
 
     func centralManager(_ c: CBCentralManager, didDisconnectPeripheral p: CBPeripheral, error: Error?) {
-        finish(BLEError.failed("The watch disconnected."))
+        finish(BLEError.failed(String(localized: "The watch disconnected.")))
         onDisconnect?()
     }
 
