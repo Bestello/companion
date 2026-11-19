@@ -99,6 +99,18 @@ struct ContentView: View {
                             }
                         }
                     }
+                    // the app's own page in Settings has the per-app Language picker
+                    Link(destination: URL(string: UIApplication.openSettingsURLString)!) {
+                        HStack(spacing: 12) {
+                            SettingsIcon(symbol: "globe", color: .blue)
+                            Text("Language")
+                            Spacer()
+                            Text(Locale.current.localizedString(forLanguageCode: Locale.current.language.languageCode?.identifier ?? "")?.localizedCapitalized ?? "")
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "arrow.up.forward").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                        }
+                    }
+                    .tint(.primary)
                     NavigationLink(value: Route.developer) {
                         HStack(spacing: 12) {
                             SettingsIcon(symbol: "hammer.fill", color: .gray)
