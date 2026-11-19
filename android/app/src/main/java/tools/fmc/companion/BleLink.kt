@@ -34,10 +34,10 @@ import tools.fmc.companion.wire.sha256Hex
 
 class BleError(message: String) : Exception(message) {
     companion object {
-        val off = BleError("Bluetooth is off.")
-        val noWatch = BleError("No watch found. Open Nothing X and make sure the watch is connected.")
-        val missing = BleError("This watch does not offer the expected services.")
-        val dropped = BleError("The watch disconnected.")
+        val off get() = BleError(str(R.string.ble_off))
+        val noWatch get() = BleError(str(R.string.ble_no_watch))
+        val missing get() = BleError(str(R.string.ble_missing))
+        val dropped get() = BleError(str(R.string.ble_dropped))
     }
 }
 
@@ -148,7 +148,7 @@ class BleLink(private val context: Context) : Link {
     private suspend fun stepLocked(op: Op, start: () -> Any?) {
         val s = Step(op)
         step = s
-        if (start() == false) throw BleError("The watch did not take the request.")
+        if (start() == false) throw BleError(str(R.string.ble_not_taken))
         withTimeout(STEP_MS) { s.done.await() }
     }
 
@@ -172,7 +172,7 @@ class BleLink(private val context: Context) : Link {
      * `onMtuChanged` when Nothing X changes the MTU, and a write that timed out can still be acknowledged late. */
     private fun finish(op: Op, status: Int) {
         val s = step?.takeIf { it.op == op } ?: return
-        if (status == BluetoothGatt.GATT_SUCCESS) s.done.complete(Unit) else s.done.completeExceptionally(BleError("GATT error $status"))
+        if (status == BluetoothGatt.GATT_SUCCESS) s.done.complete(Unit) else s.done.completeExceptionally(BleError(str(R.string.ble_gatt_error, status)))
     }
 
     private fun dispatch(c: BluetoothGattCharacteristic, value: ByteArray) {

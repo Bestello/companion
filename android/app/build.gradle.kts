@@ -46,6 +46,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    // per-app language in system settings, from the values-* folders
+    androidResources {
+        generateLocaleConfig = true
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true

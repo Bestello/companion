@@ -52,11 +52,11 @@ class RpcService : Service() {
     override fun onBind(intent: Intent?) = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        channel(this, "service", "Watch app services", NotificationManager.IMPORTANCE_LOW)
+        channel(this, "service", getString(R.string.channel_service), NotificationManager.IMPORTANCE_LOW)
         val n = NotificationCompat.Builder(this, "service")
             .setSmallIcon(R.drawable.ic_watch)
-            .setContentTitle("Watch apps can reach your phone")
-            .setContentText("Calendar, weather and the rest, as you allowed them.")
+            .setContentTitle(getString(R.string.service_title))
+            .setContentText(getString(R.string.service_text))
             .setContentIntent(appsIntent(this))
             .setOngoing(true)
             .build()

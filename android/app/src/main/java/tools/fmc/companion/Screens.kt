@@ -1,5 +1,7 @@
 package tools.fmc.companion
 
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
 import com.mikepenz.markdown.m3.Markdown
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.buildAnnotatedString
@@ -174,15 +176,15 @@ fun App(model: AppModel, nav: Nav) {
         bottomBar = {
             NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                 NavigationBarItem(nav.tab == 0, { nav.tab = 0; nav.root() },
-                    icon = { Icon(Icons.Default.Home, null) }, label = { Text("Watch faces") })
+                    icon = { Icon(Icons.Default.Home, null) }, label = { Text(stringResource(R.string.watch_faces)) })
                 val pending = liveGrants().pending().size
-                NavigationBarItem(nav.tab == 2, { nav.tab = 2; nav.root() }, label = { Text("Apps") }, icon = {
+                NavigationBarItem(nav.tab == 2, { nav.tab = 2; nav.root() }, label = { Text(stringResource(R.string.apps)) }, icon = {
                     BadgedBox({ if (pending > 0) androidx.compose.material3.Badge { Text("$pending") } }) {
                         Icon(painterResource(R.drawable.ic_apps), null, Modifier.size(24.dp))
                     }
                 })
                 NavigationBarItem(nav.tab == 1, { nav.tab = 1; nav.root() },
-                    icon = { Icon(painterResource(R.drawable.ic_watch), null, Modifier.size(24.dp)) }, label = { Text("Watch") })
+                    icon = { Icon(painterResource(R.drawable.ic_watch), null, Modifier.size(24.dp)) }, label = { Text(stringResource(R.string.watch)) })
             }
         },
     ) { pad ->
@@ -206,7 +208,7 @@ fun App(model: AppModel, nav: Nav) {
 @Composable
 fun Bar(title: String, back: (() -> Unit)? = null, actions: @Composable RowScope.() -> Unit = {}) = TopAppBar(
     title = { Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold) },
-    navigationIcon = { back?.let { IconButton(it) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } } },
+    navigationIcon = { back?.let { IconButton(it) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } } },
     actions = actions,
     windowInsets = WindowInsets(0),
     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
@@ -258,13 +260,13 @@ fun CatalogScreen(model: AppModel, open: (String) -> Unit) {
     } }
     LaunchedEffect(nearEnd, shown.size) { if (nearEnd) model.more() }
     Column {
-        Bar(if (showMine) "My watch faces" else if (signedIn && shelf == 1) "Liked" else "Watch faces") {
+        Bar(if (showMine) stringResource(R.string.my_watch_faces) else if (signedIn && shelf == 1) stringResource(R.string.liked) else stringResource(R.string.watch_faces)) {
             Box {
-                IconButton({ sorting = true }) { Icon(painterResource(R.drawable.ic_sort), "Sort") }
+                IconButton({ sorting = true }) { Icon(painterResource(R.drawable.ic_sort), stringResource(R.string.sort)) }
                 DropdownMenu(sorting, { sorting = false }) {
-                    listOf("Newest", "Popular", "Most downloaded").forEachIndexed { i, label ->
+                    listOf(stringResource(R.string.sort_newest), stringResource(R.string.sort_popular), stringResource(R.string.sort_most_downloaded)).forEachIndexed { i, label ->
                         DropdownMenuItem({ Text(label) }, { sort = i; sorting = false },
-                            trailingIcon = { if (i == sort) Icon(Icons.Default.Check, "Selected") })
+                            trailingIcon = { if (i == sort) Icon(Icons.Default.Check, stringResource(R.string.selected)) })
                     }
                 }
             }
@@ -277,25 +279,25 @@ fun CatalogScreen(model: AppModel, open: (String) -> Unit) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         if (model.user != null) {
                             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                                listOf("All", "Liked", "Mine").forEachIndexed { i, label ->
+                                listOf(stringResource(R.string.shelf_all), stringResource(R.string.liked), stringResource(R.string.shelf_mine)).forEachIndexed { i, label ->
                                     SegmentedButton(shelf == i, { shelf = i },
                                         SegmentedButtonDefaults.itemShape(i, 3)) { Text(label) }
                                 }
                             }
                         }
                         OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true,
-                            placeholder = { Text("Name or author") }, leadingIcon = { Icon(Icons.Default.Search, null) })
+                            placeholder = { Text(stringResource(R.string.search_placeholder)) }, leadingIcon = { Icon(Icons.Default.Search, null) })
                     }
                 }
                 if (shown.isEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         val empty = when {
-                            model.catalogError != null -> "Couldn't load watch faces\n${model.catalogError}"
-                            model.catalogLoading -> "Loading…"
-                            q.isNotEmpty() -> "Nothing found"
-                            showMine -> "No watch faces yet"
-                            signedIn && shelf == 1 -> "No liked watch faces"
-                            else -> "Loading…"
+                            model.catalogError != null -> stringResource(R.string.catalog_error, model.catalogError.orEmpty())
+                            model.catalogLoading -> stringResource(R.string.loading)
+                            q.isNotEmpty() -> stringResource(R.string.nothing_found)
+                            showMine -> stringResource(R.string.no_watch_faces_yet)
+                            signedIn && shelf == 1 -> stringResource(R.string.no_liked_watch_faces)
+                            else -> stringResource(R.string.loading)
                         }
                         Text(empty, Modifier.padding(top = 80.dp), color = Fmc.secondary, textAlign = TextAlign.Center)
                     }
@@ -316,7 +318,7 @@ fun FaceCard(model: AppModel, face: Watchface, open: () -> Unit) =
         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             FacePreview(face.thumbURL, Modifier.fillMaxWidth().padding(bottom = 2.dp))
             Text(face.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (!face.published) Text("Draft", style = MaterialTheme.typography.bodySmall, color = Fmc.secondary)
+            if (!face.published) Text(stringResource(R.string.draft), style = MaterialTheme.typography.bodySmall, color = Fmc.secondary)
             else face.author?.let { author ->
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Avatar(face.authorAvatar, author, 18.dp)
@@ -343,7 +345,7 @@ fun AuthorScreen(model: AppModel, id: String, open: (String) -> Unit, back: () -
     Column {
         Bar(first?.author ?: "", back) {
             IconButton({ context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("$FMC/user/$id"))) }) {
-                Icon(painterResource(R.drawable.ic_open_in_new), "Open on fmc.tools")
+                Icon(painterResource(R.drawable.ic_open_in_new), stringResource(R.string.open_on_fmc))
             }
         }
         LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp),
@@ -353,8 +355,11 @@ fun AuthorScreen(model: AppModel, id: String, open: (String) -> Unit, back: () -
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Avatar(first?.authorAvatar, first?.author ?: "?", 80.dp)
                     Text(first?.author ?: "", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Text("${faces.size} watch faces · ${compact(faces.sumOf { it.downloads })} downloads · " +
-                        "${compact(faces.sumOf { model.likeCount(it) })} likes", color = Fmc.secondary)
+                    val downloads = faces.sumOf { it.downloads }
+                    val likes = faces.sumOf { model.likeCount(it) }
+                    Text(pluralStringResource(R.plurals.author_faces, faces.size, "${faces.size}") + " · " +
+                        pluralStringResource(R.plurals.author_downloads, downloads, compact(downloads)) + " · " +
+                        pluralStringResource(R.plurals.author_likes, likes, compact(likes)), color = Fmc.secondary)
                 }
             }
             items(faces, key = { it.id }) { face -> FaceCard(model, face) { open(face.id) } }
@@ -454,7 +459,7 @@ fun FaceScreen(model: AppModel, id: String, author: (String) -> Unit = {}, back:
     suspend fun ask(slots: List<DialSlot>) = CompletableDeferred<Long?>().also { picking = slots to it }.await()
 
     LaunchedEffect(id) {
-        try { face = model.face(id) } catch (e: Exception) { error = e.message ?: "Couldn't load the watch face" }
+        try { face = model.face(id) } catch (e: Exception) { error = e.message ?: str(R.string.face_load_failed) }
     }
 
     fun upload(bin: ByteArray) = scope.launch {
@@ -468,7 +473,7 @@ fun FaceScreen(model: AppModel, id: String, author: (String) -> Unit = {}, back:
         } catch (e: CancellationException) {
             if (!isActive) throw e // a dismissed slot dialog cancels the install, not the screen
         } catch (e: Exception) {
-            failure = e.message ?: "The watch did not answer."
+            failure = e.message ?: str(R.string.watch_no_answer)
         } finally {
             progress = null
         }
@@ -505,7 +510,7 @@ fun FaceScreen(model: AppModel, id: String, author: (String) -> Unit = {}, back:
         Bar(face?.name ?: "", back) {
             face?.let { f ->
                 IconButton({ context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(f.pageURL))) }) {
-                    Icon(painterResource(R.drawable.ic_open_in_new), "Open on fmc.tools")
+                    Icon(painterResource(R.drawable.ic_open_in_new), stringResource(R.string.open_on_fmc))
                 }
             }
         }
@@ -520,21 +525,21 @@ fun FaceScreen(model: AppModel, id: String, author: (String) -> Unit = {}, back:
                             Text(f.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,
                                 textAlign = TextAlign.Center)
                             f.otherDevice?.let { other ->
-                                Text("⚠ Made for the $other. It may not work on the Watch Pro 2.", color = Fmc.warning,
+                                Text(stringResource(R.string.made_for_other, other), color = Fmc.warning,
                                     style = MaterialTheme.typography.bodyMedium,
                                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
                                         .background(Fmc.warning.copy(alpha = 0.12f)).padding(12.dp))
                             }
                             val p = progress
                             if (p != null) {
-                                Text("Installing…")
+                                Text(stringResource(R.string.installing))
                                 LinearProgressIndicator({ p }, Modifier.fillMaxWidth().padding(horizontal = 20.dp))
                             } else {
-                                PrimaryButton(if (installed) "Installed" else "Install", !installed && f.binURL != null) {
+                                PrimaryButton(if (installed) stringResource(R.string.installed) else stringResource(R.string.install), !installed && f.binURL != null) {
                                     install()
                                 }
                             }
-                            Text("Close Nothing X before installing: the watch talks to one app at a time.",
+                            Text(stringResource(R.string.close_nothing_x_hint),
                                 style = MaterialTheme.typography.bodySmall, color = Fmc.secondary, textAlign = TextAlign.Center)
                         }
                     }
@@ -543,22 +548,22 @@ fun FaceScreen(model: AppModel, id: String, author: (String) -> Unit = {}, back:
                             f.author?.let { name ->
                                 Row(Modifier.fillMaxWidth().clickable(enabled = f.ownerId != null) { f.ownerId?.let(author) },
                                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("Author", Modifier.weight(1f))
+                                    Text(stringResource(R.string.author), Modifier.weight(1f))
                                     Avatar(f.authorAvatar, name, 24.dp)
                                     Text(name, color = Fmc.secondary)
                                     Text("›", color = Fmc.secondary)
                                 }
                                 HorizontalDivider()
                             }
-                            Row { Text("Downloads", Modifier.weight(1f)); Text("${f.downloads}", color = Fmc.secondary) }
+                            Row { Text(stringResource(R.string.downloads), Modifier.weight(1f)); Text("${f.downloads}", color = Fmc.secondary) }
                             HorizontalDivider()
-                            Row(verticalAlignment = Alignment.CenterVertically) { Text("Likes", Modifier.weight(1f)); LikeButton(model, f) }
+                            Row(verticalAlignment = Alignment.CenterVertically) { Text(stringResource(R.string.likes), Modifier.weight(1f)); LikeButton(model, f) }
                         }
                     }
-                    if (f.description.isNotEmpty()) item { Section("About") { SelectionContainer { Markdown(f.description) } } }
+                    if (f.description.isNotEmpty()) item { Section(stringResource(R.string.about)) { SelectionContainer { Markdown(f.description) } } }
                 }
                 error != null -> item {
-                    Text("Couldn't load the watch face\n$error", Modifier.fillMaxWidth().padding(32.dp),
+                    Text(stringResource(R.string.face_load_error, error.orEmpty()), Modifier.fillMaxWidth().padding(32.dp),
                         textAlign = TextAlign.Center, color = Fmc.secondary)
                 }
                 else -> item {
@@ -572,32 +577,31 @@ fun FaceScreen(model: AppModel, id: String, author: (String) -> Unit = {}, back:
 
     if (closeNothingX) AlertDialog(
         onDismissRequest = { closeNothingX = false },
-        title = { Text("Close Nothing X first") },
+        title = { Text(stringResource(R.string.close_nothing_x_title)) },
         text = {
-            Text("The watch talks to one app at a time. Close Nothing X (swipe it away in Recents), then install.\n\n" +
-                "Afterwards Nothing X may not see the watch. Then forget the watch in Bluetooth settings and add it again in Nothing X.")
+            Text(stringResource(R.string.close_nothing_x_face))
         },
-        confirmButton = { TextButton({ closeNothingX = false; fetchAndInstall() }) { Text("Install") } },
-        dismissButton = { TextButton({ closeNothingX = false }) { Text("Cancel") } },
+        confirmButton = { TextButton({ closeNothingX = false; fetchAndInstall() }) { Text(stringResource(R.string.install)) } },
+        dismissButton = { TextButton({ closeNothingX = false }) { Text(stringResource(R.string.cancel)) } },
     )
     big?.let { (bin, w, h) ->
         AlertDialog(
             onDismissRequest = { big = null },
-            title = { Text("Large images") },
-            text = { Text("This face has a $w×$h px image, larger than factory faces use. Large images can make the watch restart in a loop.") },
-            confirmButton = { TextButton({ big = null; upload(bin) }) { Text("Install anyway", color = Fmc.danger) } },
-            dismissButton = { TextButton({ big = null }) { Text("Cancel") } },
+            title = { Text(stringResource(R.string.large_images_title)) },
+            text = { Text(stringResource(R.string.large_images_text, w, h)) },
+            confirmButton = { TextButton({ big = null; upload(bin) }) { Text(stringResource(R.string.install_anyway), color = Fmc.danger) } },
+            dismissButton = { TextButton({ big = null }) { Text(stringResource(R.string.cancel)) } },
         )
     }
     picking?.let { (slots, answer) ->
         fun done(id: Long?) { picking = null; answer.complete(id) }
         AlertDialog(
             onDismissRequest = { done(null) },
-            title = { Text("The watch is full") },
+            title = { Text(stringResource(R.string.watch_full_title)) },
             text = {
                 // the faces as on the Watch tab: tap the one to replace
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Text("Pick the face to replace. Faces are in the order the watch shows them.", color = Fmc.secondary)
+                    Text(stringResource(R.string.watch_full_pick), color = Fmc.secondary)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(slots, key = { it.index }) { s ->
                             DialTile(model, s, Modifier.clip(RoundedCornerShape(12.dp)).clickable { done(s.id) })
@@ -606,12 +610,12 @@ fun FaceScreen(model: AppModel, id: String, author: (String) -> Unit = {}, back:
                 }
             },
             confirmButton = {},
-            dismissButton = { TextButton({ done(null) }) { Text("Cancel") } },
+            dismissButton = { TextButton({ done(null) }) { Text(stringResource(R.string.cancel)) } },
         )
     }
     failure?.let {
-        AlertDialog(onDismissRequest = { failure = null }, title = { Text("Couldn't install") }, text = { Text(it) },
-            confirmButton = { TextButton({ failure = null }) { Text("OK") } })
+        AlertDialog(onDismissRequest = { failure = null }, title = { Text(stringResource(R.string.install_failed)) }, text = { Text(it) },
+            confirmButton = { TextButton({ failure = null }) { Text(stringResource(R.string.ok)) } })
     }
 }
 
@@ -636,11 +640,11 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
                         val progress = AppUpdate.progress
                         if (progress != null) {
                             Column(Modifier.padding(16.dp)) {
-                                Text("Downloading ${r.name}…")
+                                Text(stringResource(R.string.downloading_update, r.name))
                                 LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
                             }
                         } else {
-                            NavRow("Update to ${r.name}", onClick = { scope.launch { AppUpdate.install(context) } }) {
+                            NavRow(stringResource(R.string.update_to, r.name), onClick = { scope.launch { AppUpdate.install(context) } }) {
                                 IconTile(painterResource(R.drawable.ic_watch), Color(0xFF34C759))
                             }
                         }
@@ -648,7 +652,7 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
                 }
             }
             item {
-                Section(footer = "Keep the watch connected in Nothing X. The app only reads from it.") {
+                Section(footer = stringResource(R.string.watch_footer)) {
                     WatchStatus(model) { check() }
                     // the watch is usually there: read it on opening, as the Apps tab does
                     LaunchedEffect(Unit) { if (model.phase is Phase.Idle) check() }
@@ -668,7 +672,7 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
                         if (!bind && retry && e is WireError.Timeout) return read(false, retry = false)
                         if (!bind) DevLog.log(context, "faces: ${if (e is UploadError.AuthFailed) "the saved stock key was refused" else e.toString()}")
                         if (!bind && (e is UploadError.AuthFailed || e is WireError.Timeout)) null // the list stays as last read
-                        else "Couldn't read the faces on the watch: ${e.message}"
+                        else str(R.string.faces_read_failed, e.message.toString())
                     }
                     reading = false
                     model.facesRead++
@@ -682,20 +686,20 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
                     busy = true
                     readError = try { op(); null } catch (e: Exception) {
                         if (e is CancellationException) throw e
-                        else "Couldn't change the faces on the watch: ${e.message}"
+                        else str(R.string.faces_change_failed, e.message.toString())
                     }
                     busy = false
                     model.facesRead++
                 }
                 deleting?.let { slot ->
-                    AlertDialog({ deleting = null }, title = { Text("Delete ${slot.label}?") },
-                        text = { Text("It goes from the watch. To get it back, install it again.") },
-                        confirmButton = { TextButton({ deleting = null; change { deleteFace(context, model.store, slot.id) } }) { Text("Delete", color = Fmc.danger) } },
-                        dismissButton = { TextButton({ deleting = null }) { Text("Cancel") } })
+                    AlertDialog({ deleting = null }, title = { Text(stringResource(R.string.delete_face_title, slot.label)) },
+                        text = { Text(stringResource(R.string.delete_face_text)) },
+                        confirmButton = { TextButton({ deleting = null; change { deleteFace(context, model.store, slot.id) } }) { Text(stringResource(R.string.delete), color = Fmc.danger) } },
+                        dismissButton = { TextButton({ deleting = null }) { Text(stringResource(R.string.cancel)) } })
                 }
                 val on = remember(model.facesRead) { facesOnWatch(context) }
                 LaunchedEffect(on.faces.map { it.id }) { model.resolveDials(on.faces.map { it.id }) }
-                Section(on.count?.let { "Watch faces · $it" } ?: "Watch faces") {
+                Section(on.count?.let { stringResource(R.string.watch_faces_count, it) } ?: stringResource(R.string.watch_faces)) {
                     val faces = on.faces
                     // as Nothing X and fmc.tools show them: the round previews in the watch's own order. An FMC face,
                     // from here or fmc.tools, is dialId(record id) and has its catalog preview.
@@ -716,8 +720,8 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
                                     onLongClick = { menu = true }) { change { activateFace(context, model.store, slot.id) } },
                                     active = slot.id == on.active)
                                 DropdownMenu(menu, { menu = false }) {
-                                    DropdownMenuItem({ Text("Show on the watch") }, { menu = false; change { activateFace(context, model.store, slot.id) } })
-                                    DropdownMenuItem({ Text("Delete", color = Fmc.danger) }, { menu = false; deleting = slot })
+                                    DropdownMenuItem({ Text(stringResource(R.string.show_on_watch)) }, { menu = false; change { activateFace(context, model.store, slot.id) } })
+                                    DropdownMenuItem({ Text(stringResource(R.string.delete), color = Fmc.danger) }, { menu = false; deleting = slot })
                                 }
                             }
                         }
@@ -736,8 +740,8 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
                             if (rest > 0.001f) Spacer(Modifier.weight(rest))
                         }
                     }
-                    if (reading) Text("Reading the watch…", color = Fmc.secondary)
-                    else if (faces.isEmpty()) Text("Connect to see the faces on the watch.", color = Fmc.secondary)
+                    if (reading) Text(stringResource(R.string.reading_watch), color = Fmc.secondary)
+                    else if (faces.isEmpty()) Text(stringResource(R.string.connect_to_see_faces), color = Fmc.secondary)
                     readError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 }
             }
@@ -746,25 +750,24 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
                 LaunchedEffect(model.phase) { if (model.phase is Phase.Checked) FirmwareModel.refresh(model.account.token) }
                 Section {
                     if (model.phase is Phase.Checked) {
-                        NavRow("Firmware", count = FirmwareModel.updates(model.loader), onClick = { nav.firmware = true }) {
+                        NavRow(stringResource(R.string.firmware), count = FirmwareModel.updates(model.loader), onClick = { nav.firmware = true }) {
                             IconTile(painterResource(R.drawable.ic_memory), Color(0xFF757575))
                         }
                         HorizontalDivider()
                     }
-                    NavRow("Developer", onClick = { nav.developer = true }) { IconTile(Icons.Default.Build, Color(0xFF757575)) }
+                    NavRow(stringResource(R.string.developer_options), onClick = { nav.developer = true }) { IconTile(Icons.Default.Build, Color(0xFF757575)) }
                 }
             }
             item {
-                Section("Settings", footer = "Watch apps ask for your calendar, location, weather, notifications or a website. " +
-                    "You answer each one on the Apps tab.") {
+                Section(stringResource(R.string.settings), footer = stringResource(R.string.services_footer)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Services for watch apps", Modifier.weight(1f))
+                        Text(stringResource(R.string.services_switch), Modifier.weight(1f))
                         Switch(model.services, { on -> if (on) startServices() else model.switchServices(false) })
                     }
                 }
             }
             item {
-                Section("FMC account") {
+                Section(stringResource(R.string.fmc_account)) {
                     val user = model.user
                     if (user != null) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -774,19 +777,19 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
                                 else Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Person, null, tint = MaterialTheme.colorScheme.onPrimary) }
                             }
                             Column {
-                                Text(user.name.ifEmpty { "Signed in" }, fontWeight = FontWeight.SemiBold)
+                                Text(user.name.ifEmpty { stringResource(R.string.signed_in) }, fontWeight = FontWeight.SemiBold)
                                 Text(user.email, style = MaterialTheme.typography.bodyMedium, color = Fmc.secondary)
                             }
                         }
                         HorizontalDivider()
-                        Text("Sign out", Modifier.fillMaxWidth().clickable { model.signOut() })
+                        Text(stringResource(R.string.sign_out), Modifier.fillMaxWidth().clickable { model.signOut() })
                         HorizontalDivider()
-                        Text("Delete account", Modifier.fillMaxWidth().clickable { deleting = true }, color = Fmc.danger)
+                        Text(stringResource(R.string.delete_account), Modifier.fillMaxWidth().clickable { deleting = true }, color = Fmc.danger)
                     } else {
                         Row(Modifier.fillMaxWidth().clickable(onClick = signIn), verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Icon(Icons.Default.AccountCircle, null)
-                            Text("Sign in", Modifier.weight(1f))
+                            Text(stringResource(R.string.sign_in), Modifier.weight(1f))
                             Text("›", color = Fmc.secondary)
                         }
                     }
@@ -796,19 +799,19 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
     }
     if (deleting) AlertDialog(
         onDismissRequest = { deleting = false },
-        title = { Text("Delete your FMC account?") },
-        text = { Text("This removes your account and profile on fmc.tools. It can't be undone.") },
+        title = { Text(stringResource(R.string.delete_account_title)) },
+        text = { Text(stringResource(R.string.delete_account_text)) },
         confirmButton = {
             TextButton({
                 deleting = false
                 scope.launch { try { model.deleteAccount() } catch (e: Exception) { deleteError = e.message } }
-            }) { Text("Delete account", color = Fmc.danger) }
+            }) { Text(stringResource(R.string.delete_account), color = Fmc.danger) }
         },
-        dismissButton = { TextButton({ deleting = false }) { Text("Cancel") } },
+        dismissButton = { TextButton({ deleting = false }) { Text(stringResource(R.string.cancel)) } },
     )
     deleteError?.let {
-        AlertDialog(onDismissRequest = { deleteError = null }, title = { Text("Couldn't delete the account") },
-            text = { Text(it) }, confirmButton = { TextButton({ deleteError = null }) { Text("OK") } })
+        AlertDialog(onDismissRequest = { deleteError = null }, title = { Text(stringResource(R.string.delete_account_failed)) },
+            text = { Text(it) }, confirmButton = { TextButton({ deleteError = null }) { Text(stringResource(R.string.ok)) } })
     }
 }
 
@@ -835,16 +838,16 @@ private fun WatchStatus(model: AppModel, check: () -> Unit) {
                 }
             }
             Column {
-                val title = if (model.installing) "Updating" else when (phase) {
-                    Phase.Idle -> "Not connected"
-                    Phase.Checking -> "Connecting…"
-                    is Phase.Checked -> "Connected"
-                    is Phase.Failed -> "Couldn't connect"
+                val title = if (model.installing) stringResource(R.string.status_updating) else when (phase) {
+                    Phase.Idle -> stringResource(R.string.status_not_connected)
+                    Phase.Checking -> stringResource(R.string.status_connecting)
+                    is Phase.Checked -> stringResource(R.string.status_connected)
+                    is Phase.Failed -> stringResource(R.string.status_failed)
                 }
-                val (detail, color) = if (model.installing) "The watch is installing the update…" to Fmc.secondary else when (phase) {
-                    Phase.Idle -> "Tap Connect to read it" to Fmc.secondary
-                    Phase.Checking -> "This takes a few seconds" to Fmc.secondary
-                    is Phase.Checked -> (if (phase.state == null) "Ready for watch faces" else "App Loader found") to Fmc.success
+                val (detail, color) = if (model.installing) stringResource(R.string.status_installing_update) to Fmc.secondary else when (phase) {
+                    Phase.Idle -> stringResource(R.string.status_tap_connect) to Fmc.secondary
+                    Phase.Checking -> stringResource(R.string.status_takes_seconds) to Fmc.secondary
+                    is Phase.Checked -> (if (phase.state == null) stringResource(R.string.status_ready) else stringResource(R.string.status_loader_found)) to Fmc.success
                     is Phase.Failed -> phase.message to Fmc.warning
                 }
                 // one line each: a taller row would move the watch
@@ -854,7 +857,7 @@ private fun WatchStatus(model: AppModel, check: () -> Unit) {
         }
         // opaque while disabled: the strap runs under it
         Box(Modifier.background(MaterialTheme.colorScheme.surface, CircleShape)) {
-            PrimaryButton(if (phase == Phase.Idle) "Connect" else "Check again", phase != Phase.Checking, check)
+            PrimaryButton(if (phase == Phase.Idle) stringResource(R.string.connect) else stringResource(R.string.check_again), phase != Phase.Checking, check)
         }
     }
 }
@@ -880,7 +883,7 @@ fun SignInScreen(model: AppModel, done: () -> Unit) {
                 done()
             } catch (_: CancellationException) {
             } catch (e: Exception) {
-                error = e.message ?: "Sign-in failed"
+                error = e.message ?: str(R.string.sign_in_failed)
             } finally {
                 job = null
             }
@@ -896,16 +899,16 @@ fun SignInScreen(model: AppModel, done: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Badge(64.dp) { Icon(painterResource(R.drawable.ic_watch), null, Modifier.size(32.dp)) }
                     Spacer(Modifier.height(2.dp))
-                    Text("Sign in to FMC", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-                    Text("Your fmc.tools account, for watch faces on your watch.", color = Fmc.secondary, textAlign = TextAlign.Center)
+                    Text(stringResource(R.string.sign_in_title), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.sign_in_tagline), color = Fmc.secondary, textAlign = TextAlign.Center)
                 }
             }
             item {
-                OutlinedTextField(email, { email = it }, Modifier.fillMaxWidth(), label = { Text("Email") }, singleLine = true,
+                OutlinedTextField(email, { email = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.email)) }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
             }
             item {
-                OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("Password") },
+                OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.password)) },
                     singleLine = true, visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
             }
@@ -914,10 +917,10 @@ fun SignInScreen(model: AppModel, done: () -> Unit) {
                 if (busy) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(24.dp))
-                        TextButton({ job?.cancel() }) { Text("Cancel") }
+                        TextButton({ job?.cancel() }) { Text(stringResource(R.string.cancel)) }
                     }
                 } else {
-                    PrimaryButton("Sign in", email.isNotBlank() && password.isNotEmpty()) {
+                    PrimaryButton(stringResource(R.string.sign_in), email.isNotBlank() && password.isNotEmpty()) {
                         run { model.signIn(email.trim(), password) }
                     }
                 }
@@ -926,13 +929,13 @@ fun SignInScreen(model: AppModel, done: () -> Unit) {
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         HorizontalDivider(Modifier.weight(1f))
-                        Text("or", Modifier.padding(horizontal = 12.dp), color = Fmc.secondary)
+                        Text(stringResource(R.string.or), Modifier.padding(horizontal = 12.dp), color = Fmc.secondary)
                         HorizontalDivider(Modifier.weight(1f))
                     }
                 }
                 items(model.providers.size) { i ->
                     val p = model.providers[i]
-                    SecondaryButton("Continue with ${p.displayName}", !busy) {
+                    SecondaryButton(stringResource(R.string.continue_with, p.displayName), !busy) {
                         error = null
                         run {
                             model.signIn(p) { url -> openAuthPage(context, url) }
@@ -944,7 +947,7 @@ fun SignInScreen(model: AppModel, done: () -> Unit) {
                 }
             }
             item {
-                Text("No account? Sign up at fmc.tools", Modifier.fillMaxWidth().padding(top = 8.dp).clickable {
+                Text(stringResource(R.string.sign_up_hint), Modifier.fillMaxWidth().padding(top = 8.dp).clickable {
                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Account.SIGN_UP)))
                 }, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
             }
