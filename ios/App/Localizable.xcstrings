@@ -1685,13 +1685,13 @@
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Не удалось подключиться"
+            "value" : "Нет связи"
           }
         },
         "uk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Не вдалося підключитися"
+            "value" : "Немає зв'язку"
           }
         },
         "es" : {
@@ -2848,13 +2848,13 @@
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Instaladas"
+            "value" : "Instalado"
           }
         },
         "hi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "इंस्टॉल किए गए"
+            "value" : "इंस्टॉल किया गया"
           }
         }
       }
