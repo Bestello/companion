@@ -27,7 +27,8 @@ import org.json.JSONObject
 import tools.fmc.companion.wire.Event
 import tools.fmc.companion.wire.HTTP_BODY_MAX
 import tools.fmc.companion.wire.HttpCall
-import tools.fmc.companion.wire.RequestParts
+import tools.fmc.companion.wire.KeyValueStore
+import tools.fmc.companion.wire.RpcState
 import tools.fmc.companion.wire.httpHost
 import tools.fmc.companion.wire.parseHttpCall
 import tools.fmc.companion.wire.requestHeaders
@@ -56,7 +57,7 @@ class PhoneServices(private val context: Context, private val grants: Grants) : 
         if (grants.markAsked(pkg, cap)) notifyAsk(context, pkg, cap, write)
     }
 
-    override val parts = RequestParts()
+    override val state = RpcState(appStorage(context))
 
     override suspend fun call(pkg: String, method: Int, args: ByteArray): List<ByteArray> {
         val show = grants.showText(pkg)
@@ -203,6 +204,9 @@ class PhoneServices(private val context: Context, private val grants: Grants) : 
         @Volatile var forecast: Forecast? = null
     }
 }
+
+/** Watch apps' key/value stores (storage, 0x60–0x62): app files Android doesn't back up. */
+fun appStorage(context: Context) = KeyValueStore(java.io.File(context.noBackupFilesDir, "storage"))
 
 /** The notifications shown now; the user turns it on in Android's notification access settings. */
 class NotificationWatcher : NotificationListenerService() {

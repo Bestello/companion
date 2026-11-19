@@ -12,6 +12,9 @@ It counts anonymous usage events (see below).
   on the phone.
 - **Permissions you grant to watch apps.** Your answers are stored only on the phone. Deleting an app from the watch
   with FMC Companion forgets them.
+- **Data watch apps keep on the phone.** A watch app can store up to 64 KiB of its own data on the phone. It stays
+  in the app's files on the phone, isn't backed up, and goes when you delete the app from the watch with FMC
+  Companion.
 - **Headers and cookies for watch apps' web requests.** Headers you type for an app and a host (an API key, for
   example) are kept encrypted on the phone (iOS Keychain, Android Keystore) and never sent to the watch. Cookies a
   host sets are kept in memory per app and host. Reset permissions or deleting the app forgets both.

@@ -23,6 +23,17 @@ object Method {
     const val HTTP = 0x40
     const val HTTP_REQUEST = 0x41
     const val NOTIFICATIONS = 0x50
+    const val STORAGE_GET = 0x60
+    const val STORAGE_PUT = 0x61
+    const val STORAGE_DELETE = 0x62
+
+    /** Methods whose request comes in parts (`index ‖ total ‖ chunk`). */
+    val MULTI_PART = setOf(HTTP_REQUEST, STORAGE_PUT)
+}
+
+/** What the phone keeps between requests: the parts of a request not joined yet, and each package's store. */
+class RpcState(val storage: KeyValueStore) {
+    val parts = RequestParts()
 }
 
 object RpcStatus {
@@ -160,26 +171,26 @@ fun requestHeaders(user: List<Pair<String, String>>, body: ByteArray): List<Pair
 
 /** Joins the parts of `http.request` (`index ‖ total ‖ chunk`), one open request per package. */
 class RequestParts {
-    private class Open(val id: Int, val total: Int, val next: Int, val data: ByteArray)
+    private class Open(val id: Int, val method: Int, val total: Int, val next: Int, val data: ByteArray)
     private val open = mutableMapOf<String, Open>()
 
     /** The joined payload after the last part, null before it. `BAD_REQUEST` for a part out of order, a new id
-     *  before the last part, or total outside 1..9; the open request is dropped then. */
-    @Synchronized fun add(pkg: String, id: Int, args: ByteArray): ByteArray? {
+     *  (or another multi-part method) before the last part, or total outside 1..9; the open request is dropped then. */
+    @Synchronized fun add(pkg: String, id: Int, args: ByteArray, method: Int = Method.HTTP_REQUEST): ByteArray? {
         val prev = open.remove(pkg)
         if (args.size < 2 || args.size - 2 > RECORD_MAX || args.u8(1) !in 1..9) throw RpcError(RpcStatus.BAD_REQUEST)
         val index = args.u8(0)
         val total = args.u8(1)
         val chunk = args.copyOfRange(2, args.size)
         val data = if (prev != null) {
-            if (prev.id != id || prev.total != total || index != prev.next) throw RpcError(RpcStatus.BAD_REQUEST)
+            if (prev.id != id || prev.method != method || prev.total != total || index != prev.next) throw RpcError(RpcStatus.BAD_REQUEST)
             prev.data + chunk
         } else {
             if (index != 0) throw RpcError(RpcStatus.BAD_REQUEST)
             chunk
         }
         if (index == total - 1) return data
-        open[pkg] = Open(id, total, index + 1, data)
+        open[pkg] = Open(id, method, total, index + 1, data)
         return null
     }
 }
@@ -205,8 +216,8 @@ interface Phone {
      *  can change data on the host (the ask says so). */
     fun ask(pkg: String, cap: String, write: Boolean)
 
-    /** Joins http.request parts; one per phone. */
-    val parts: RequestParts
+    /** Parts, stores: one per phone. */
+    val state: RpcState
 
     /** The records of a granted call; `RpcError` for any other status. For http.request `args` is the joined
      *  payload. */
@@ -223,13 +234,20 @@ suspend fun answer(pkg: String, msg: ByteArray, phone: Phone, budgetMs: Long = 7
         val fixed = listOf(Method.CALENDAR to "calendar", Method.LOCATION to "location", Method.WEATHER to "weather",
             Method.NOTIFICATIONS to "notifications").filter { ok(it.second) }.map { it.first }
         val http = if (grants.any { it.key.startsWith("http:") && it.value }) listOf(Method.HTTP, Method.HTTP_REQUEST) else emptyList()
-        return replies(r.id, RpcStatus.OK, listOf((fixed + http).sorted().map { it.toByte() }.toByteArray()))
+        val free = listOf(Method.STORAGE_GET, Method.STORAGE_PUT, Method.STORAGE_DELETE)
+        return replies(r.id, RpcStatus.OK, listOf(((fixed + http).sorted() + free).map { it.toByte() }.toByteArray()))
     }
-    // http.request: no reply before its last part, then the joined payload stands for the args
-    val args = if (method != Method.HTTP_REQUEST) r.args else try {
-        phone.parts.add(pkg, r.id, r.args) ?: return emptyList()
+    // multi-part: no reply before the last part, then the joined payload stands for the args
+    val args = if (method !in Method.MULTI_PART) r.args else try {
+        phone.state.parts.add(pkg, r.id, r.args, method) ?: return emptyList()
     } catch (e: RpcError) {
         return replies(r.id, e.status)
+    }
+    // no cap: the phone's own store
+    if (method in Method.STORAGE_GET..Method.STORAGE_DELETE) return try {
+        replies(r.id, RpcStatus.OK, storage(phone.state.storage, pkg, method, args))
+    } catch (e: RpcError) {
+        replies(r.id, e.status)
     }
     val cap = capOf(method, args) ?: return replies(r.id, RpcStatus.BAD_REQUEST)
     when (grants[cap]) {
@@ -242,4 +260,15 @@ suspend fun answer(pkg: String, msg: ByteArray, phone: Phone, budgetMs: Long = 7
     val result = withTimeoutOrNull(budgetMs) { run.await() }
         ?: return replies(r.id, RpcStatus.UNAVAILABLE).also { run.cancel() }
     return result.fold({ replies(r.id, RpcStatus.OK, it) }, { replies(r.id, (it as? RpcError)?.status ?: RpcStatus.UNAVAILABLE) })
+}
+
+private fun storage(st: KeyValueStore, pkg: String, method: Int, args: ByteArray): List<ByteArray> = when (method) {
+    Method.STORAGE_GET -> st.get(pkg, storageKey(args))?.let(::valueRecords) ?: emptyList()
+    Method.STORAGE_PUT -> {
+        val n = args.firstOrNull()?.toInt()?.and(0xFF) ?: throw RpcError(RpcStatus.BAD_REQUEST)
+        if (args.size < 1 + n) throw RpcError(RpcStatus.BAD_REQUEST)
+        st.put(pkg, storageKey(args.copyOfRange(1, 1 + n)), args.copyOfRange(1 + n, args.size))
+        emptyList()
+    }
+    else -> { st.delete(pkg, storageKey(args)); emptyList() }
 }

@@ -27,7 +27,17 @@ import WireKit
 
     func grants(_ package: String) -> [String: Bool] { Permissions.shared.grants(package) }
     func ask(_ package: String, _ cap: String, write: Bool) { Permissions.shared.ask(package, cap, write: write) }
-    let parts = RequestParts()
+    let state = RPCState(storage: PhoneServices.storage)
+
+    /// Watch apps' key/value stores (storage, 0x60–0x62): Application Support, kept out of backups.
+    static let storage: KeyValueStore = {
+        var dir = URL.applicationSupportDirectory.appending(path: "storage", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var v = URLResourceValues()
+        v.isExcludedFromBackup = true
+        try? dir.setResourceValues(v)
+        return KeyValueStore(root: dir)
+    }()
     /// "package|host" → the cookies the host set for that app's requests.
     /// ponytail: in memory, gone with the process; Keychain if apps need a login to outlive that.
     private var cookies: [String: [HTTPCookie]] = [:]

@@ -11,6 +11,16 @@ public enum RPCStatus: UInt8, Error, Sendable {
 public enum RPCMethod {
     public static let caps: UInt8 = 0x01, calendar: UInt8 = 0x10, location: UInt8 = 0x20, weather: UInt8 = 0x30
     public static let http: UInt8 = 0x40, httpRequest: UInt8 = 0x41, notifications: UInt8 = 0x50
+    public static let storageGet: UInt8 = 0x60, storagePut: UInt8 = 0x61, storageDelete: UInt8 = 0x62
+    /// Methods whose request comes in parts (`index ‖ total ‖ chunk`).
+    public static let multiPart: Set<UInt8> = [httpRequest, storagePut]
+}
+
+/// What the phone keeps between requests: the parts of a request not joined yet, and each package's store.
+@MainActor public final class RPCState {
+    public let parts = RequestParts()
+    public let storage: KeyValueStore
+    public init(storage: KeyValueStore) { self.storage = storage }
 }
 
 /// Every RPC message opens with "R1"; the app's own messages on the channel do not.
@@ -204,26 +214,28 @@ public func requestHeaders(_ user: [HTTPHeader], body: Data) -> [HTTPHeader] {
 
 /// Joins the parts of `http.request` (`index:u8 ‖ total:u8 ‖ chunk`), one open request per package.
 @MainActor public final class RequestParts {
-    private var open: [String: (id: UInt8, total: Int, next: Int, data: Data)] = [:]
+    private var open: [String: (id: UInt8, method: UInt8, total: Int, next: Int, data: Data)] = [:]
     public init() {}
 
-    /// The joined payload after the last part, nil before it. BAD_REQUEST for a part out of order, a new id
-    /// before the last part, or total outside 1…9; the open request is dropped then.
-    public func add(_ package: String, id: UInt8, args: Data) throws -> Data? {
+    /// The joined payload after the last part, nil before it. BAD_REQUEST for a part out of order, a new id (or
+    /// another multi-part method) before the last part, or total outside 1…9; the open request is dropped then.
+    public func add(_ package: String, id: UInt8, method: UInt8 = RPCMethod.httpRequest, args: Data) throws -> Data? {
         let a = [UInt8](args)
         let prev = open.removeValue(forKey: package)
         guard a.count >= 2, a.count - 2 <= 121, (1...9).contains(Int(a[1])) else { throw RPCStatus.badRequest }
         let index = Int(a[0]), total = Int(a[1])
         let data: Data
         if let prev {
-            guard prev.id == id, prev.total == total, index == prev.next else { throw RPCStatus.badRequest }
+            guard prev.id == id, prev.method == method, prev.total == total, index == prev.next else {
+                throw RPCStatus.badRequest
+            }
             data = prev.data + a[2...]
         } else {
             guard index == 0 else { throw RPCStatus.badRequest }
             data = Data(a[2...])
         }
         if index == total - 1 { return data }
-        open[package] = (id, total, index + 1, data)
+        open[package] = (id, method, total, index + 1, data)
         return nil
     }
 }
@@ -263,8 +275,8 @@ public func notificationRecord(_ n: PhoneNotification, show: Bool) -> Data {
     func weather() async throws -> (now: WeatherNow, days: [WeatherDay])
     /// http.get and http.request, with the user's headers and the cookie jar of (package, host).
     func http(_ call: HTTPCall, package: String) async throws -> (code: Int, body: Data)
-    /// Joins http.request parts; one per phone.
-    var parts: RequestParts { get }
+    /// Parts, stores: one per phone.
+    var state: RPCState { get }
     func notifications(limit: Int) async throws -> [PhoneNotification]
 }
 
@@ -314,6 +326,7 @@ public func answer(_ message: Data, package: String?, host: any RPCHost,
         if on("weather") { ids.append(RPCMethod.weather) }
         if g.contains(where: { $0.key.hasPrefix("http:") && $0.value }) { ids += [RPCMethod.http, RPCMethod.httpRequest] }
         if host.notificationsAvailable, on("notifications") { ids.append(RPCMethod.notifications) }
+        ids += [RPCMethod.storageGet, RPCMethod.storagePut, RPCMethod.storageDelete]
         return ids.isEmpty ? [] : [Data(ids)]
     case RPCMethod.calendar:
         guard a.count >= 3 else { throw RPCStatus.badRequest }
@@ -338,11 +351,24 @@ public func answer(_ message: Data, package: String?, host: any RPCHost,
         let r = try await host.http(call, package: package)
         return try httpRecords(code: r.code, body: r.body)
     case RPCMethod.httpRequest:
-        guard let joined = try host.parts.add(package, id: id, args: args) else { return nil }
+        guard let joined = try host.state.parts.add(package, id: id, method: method, args: args) else { return nil }
         guard let call = parseHTTPCall(joined) else { throw RPCStatus.badRequest }
         try permit("http:\(call.host)")
         let r = try await host.http(call, package: package)
         return try httpRecords(code: r.code, body: r.body)
+    case RPCMethod.storageGet:
+        let key = try storageKey(args)
+        guard let value = host.state.storage.get(package, key) else { return [] }
+        return valueRecords(value)
+    case RPCMethod.storagePut:
+        guard let joined = try host.state.parts.add(package, id: id, method: method, args: args) else { return nil }
+        let j = [UInt8](joined)
+        guard let n = j.first, j.count >= 1 + Int(n) else { throw RPCStatus.badRequest }
+        try host.state.storage.put(package, try storageKey(Data(j[1..<1 + Int(n)])), Data(j[(1 + Int(n))...]))
+        return []
+    case RPCMethod.storageDelete:
+        host.state.storage.delete(package, try storageKey(args))
+        return []
     case RPCMethod.notifications:
         guard host.notificationsAvailable else { throw RPCStatus.unavailable }
         guard let limit = a.first else { throw RPCStatus.badRequest }

@@ -131,7 +131,7 @@ class RpcTest {
         val asked = mutableListOf<String>()
         val writes = mutableListOf<Boolean>()
         val calls = mutableListOf<Pair<Int, ByteArray>>()
-        override val parts = RequestParts()
+        override val state = RpcState(KeyValueStore(kotlin.io.path.createTempDirectory("rpc").toFile()))
         var slow = false
         override fun grants(pkg: String) = grants
         override fun osAllows(cap: String) = os
@@ -163,7 +163,7 @@ class RpcTest {
         assertEquals(RpcStatus.BAD_REQUEST, status(answer("a", hex("5231510110"), p)), "calendar without args")
         assertNull(answer("a", hex("5231500100"), p))
         p.grants["http:example.com"] = true
-        assertEquals("52314107000001104041", answer("a", hex("5231510701"), p)!!.single().hex(), "caps")
+        assertEquals("52314107000001104041606162", answer("a", hex("5231510701"), p)!!.single().hex(), "caps")
         p.slow = true
         val t0 = System.currentTimeMillis()
         assertEquals(RpcStatus.UNAVAILABLE, status(answer("a", cal, p, budgetMs = 300)))
@@ -193,5 +193,47 @@ class RpcTest {
         answer("a", a, p)
         answer("b", a, p)
         assertEquals(RpcStatus.OK, status(answer("a", b, p)), "parts are per package")
+    }
+
+    @Test fun storageVectors() = runBlocking {
+        val st = v.getJSONObject("storage")
+        assertEquals(KeyValueStore.QUOTA, st.getInt("quota"))
+        st.getJSONArray("keys").let { a -> (0 until a.length()).map(a::getJSONObject) }.forEach { k ->
+            assertEquals(k.getBoolean("ok"), runCatching { storageKey(hex(k.getString("key"))) }.isSuccess, k.toString())
+        }
+        st.getJSONArray("get").let { a -> (0 until a.length()).map(a::getJSONObject) }.forEach { g ->
+            assertEquals(hexList(g.getJSONArray("records")), valueRecords(hex(g.getString("value"))).map { it.hex() })
+        }
+        val p = FakePhone()
+        st.getJSONArray("put").let { a -> (0 until a.length()).map(a::getJSONObject) }.forEach { c ->
+            val msgs = c.getJSONArray("messages").let { a -> (0 until a.length()).map { hex(a.getString(it)) } }
+            msgs.forEachIndexed { i, m ->
+                val r = answer("app", m, p)!!
+                if (i < msgs.size - 1) assertEquals(emptyList(), r, c.getString("note"))
+                else assertEquals(replies(m.u8(3), RpcStatus.OK).map { it.hex() }, r.map { it.hex() }, c.getString("note"))
+            }
+            assertEquals(c.getString("value"), p.state.storage.get("app", c.getString("key"))?.hex(), c.getString("note"))
+            val got = answer("app", "R1Q".toByteArray() + byteArrayOf(9, 0x60) + c.getString("key").toByteArray(), p)!!
+            assertEquals(valueRecords(hex(c.getString("value"))).map { it.hex() }, got.map { it.copyOfRange(7, it.size).hex() })
+        }
+        suspend fun get(pkg: String, key: String) = answer(pkg, "R1Q".toByteArray() + byteArrayOf(9, 0x60) + key.toByteArray(), p)!!
+        assertEquals("52314109000000", get("app", "nope").single().hex(), "missing: no records")
+        assertEquals("52314109000000", get("other", "score").single().hex(), "per package")
+        answer("app", "R1Q".toByteArray() + byteArrayOf(9, 0x62) + "score".toByteArray(), p)
+        assertNull(p.state.storage.get("app", "score"))
+        assertEquals(RpcStatus.BAD_REQUEST, status(get("app", "a/b")))
+        assertEquals(emptyList(), p.asked, "no cap")
+    }
+
+    @Test fun storageQuota() {
+        val s = KeyValueStore(kotlin.io.path.createTempDirectory("quota").toFile())
+        s.put("p", "a", ByteArray(40_000))
+        assertEquals(RpcStatus.TOO_LARGE, (runCatching { s.put("p", "b", ByteArray(30_000)) }.exceptionOrNull() as RpcError).status)
+        s.put("p", "a", ByteArray(60_000))
+        assertEquals(60_001, s.used("p"))
+        s.put("q", "b", ByteArray(30_000))
+        s.clear("p")
+        assertNull(s.get("p", "a"))
+        assert(s.get("q", "b") != null)
     }
 }

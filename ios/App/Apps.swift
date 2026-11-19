@@ -327,6 +327,7 @@ extension AppUpdates {
             Analytics.track("app_removed", ["app": name])
             // as iOS does on uninstall: a reinstall asks again
             Permissions.shared.reset(name)
+            PhoneServices.storage.clear(name) // its data on the phone goes with it; Reset permissions keeps it
             await watch.check()
         } catch InstallError.busy {
             // the stub answers BUSY to removing a page's app even behind the face (cmf-watch-sdk docs/app-guide.md)

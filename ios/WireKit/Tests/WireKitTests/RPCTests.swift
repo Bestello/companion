@@ -35,6 +35,12 @@ struct RPCVectors: Decodable {
         struct R: Decodable { let method: String, url: String, body: String }
         let note: String; let messages: [String]; let request: R?; let bad: Bool?
     }
+    struct Storage: Decodable {
+        struct Key: Decodable { let key: String; let ok: Bool }
+        struct Put: Decodable { let note: String; let messages: [String]; let key: String; let value: String }
+        struct Get: Decodable { let value: String; let records: [String] }
+        let keys: [Key]; let put: [Put]; let get: [Get]; let quota: Int
+    }
     struct Notif: Decodable {
         struct In: Decodable { let age_min: Int, app: String, text: String, show: Bool }
         let `in`: In; let hex: String
@@ -48,6 +54,7 @@ struct RPCVectors: Decodable {
     let weather: [Weather]
     let http: [Http]
     let http_request: [HttpReq]
+    let storage: Storage
     let notifications: [Notif]
     let replies: [Reply]
 
@@ -198,7 +205,8 @@ private let rv = RPCVectors.shared
 
     func grants(_ package: String) -> [String: Bool] { given[package] ?? [:] }
     var writes: [Bool] = []
-    let parts = RequestParts()
+    let state = RPCState(storage: KeyValueStore(root: FileManager.default.temporaryDirectory
+        .appendingPathComponent("rpc-tests-\(UUID().uuidString)")))
     var calls: [HTTPCall] = []
     func ask(_ package: String, _ cap: String, write: Bool) { asked.append("\(package) \(cap)"); writes.append(write) }
     func osAllowed(_ cap: String) -> Bool { !osOff.contains(cap) }
@@ -235,7 +243,7 @@ private func ask(_ host: FakeHost, _ m: Data, package: String? = "weather.app",
     let cal = call(RPCMethod.calendar, [0, 1, 5])
     #expect(await ask(h, cal)?.0 == .ask)
     #expect(h.asked == ["weather.app calendar"])
-    #expect(await ask(h, call(RPCMethod.caps))?.1 == [])
+    #expect(await ask(h, call(RPCMethod.caps))?.1 == [storageIDs])
 
     h.given["weather.app"] = ["calendar": false]
     #expect(await ask(h, cal)?.0 == .denied)
@@ -244,7 +252,7 @@ private func ask(_ host: FakeHost, _ m: Data, package: String? = "weather.app",
     h.given["weather.app"] = ["calendar": true, "http:example.com": true]
     h.osOff = ["calendar"]
     #expect(await ask(h, cal)?.0 == .denied, "OS permission off")
-    #expect(await ask(h, call(RPCMethod.caps))?.1 == [Data([RPCMethod.http, RPCMethod.httpRequest])])
+    #expect(await ask(h, call(RPCMethod.caps))?.1 == [Data([RPCMethod.http, RPCMethod.httpRequest]) + storageIDs])
 
     h.osOff = []
     h.events = [
@@ -256,7 +264,7 @@ private func ask(_ host: FakeHost, _ m: Data, package: String? = "weather.app",
     #expect(s == .ok)
     #expect(records.map { $0[0] } == [0, 1], "sorted, all-day first in a day, cut to limit")
     #expect(records.allSatisfy { $0[5] & 4 != 0 && $0.count == 8 }, "text hidden by default")
-    #expect(await ask(h, call(RPCMethod.caps))?.1 == [Data([RPCMethod.calendar, RPCMethod.http, RPCMethod.httpRequest])])
+    #expect(await ask(h, call(RPCMethod.caps))?.1 == [Data([RPCMethod.calendar, RPCMethod.http, RPCMethod.httpRequest]) + storageIDs])
 }
 
 @Test @MainActor func rpcBadRequests() async {
@@ -310,4 +318,41 @@ private func ask(_ host: FakeHost, _ m: Data, package: String? = "weather.app",
     #expect(await answer(a, package: "weather.app", host: h) == [])
     #expect(await answer(a, package: "other.app", host: h) == [])
     #expect(await ask(h, b)?.0 == .ok)
+}
+
+/// Methods every package may call, at the end of `caps`.
+let storageIDs = Data([RPCMethod.storageGet, RPCMethod.storagePut, RPCMethod.storageDelete])
+
+@Test @MainActor func rpcStorageVectors() async throws {
+    let st = rv.storage
+    #expect(st.quota == KeyValueStore.quota)
+    for k in st.keys { #expect(((try? storageKey(hex(k.key))) != nil) == k.ok, "\(k.key)") }
+    for g in st.get { #expect(valueRecords(hex(g.value)) == g.records.map(hex)) }
+    let h = FakeHost()
+    for c in st.put {
+        for (i, m) in c.messages.enumerated() {
+            let r = try #require(await answer(hex(m), package: "app", host: h))
+            if i < c.messages.count - 1 { #expect(r.isEmpty, "\(c.note)") } else { #expect(r == replies(id: hex(m)[3], status: .ok, records: []), "\(c.note)") }
+        }
+        #expect(h.state.storage.get("app", c.key) == hex(c.value), "\(c.note)")
+        let got = await ask(h, call(RPCMethod.storageGet, Array(c.key.utf8)), package: "app")
+        #expect(got?.0 == .ok && got?.1 == (c.value.isEmpty ? [Data([0, 0])] : valueRecords(hex(c.value))), "\(c.note)")
+    }
+    #expect(await ask(h, call(RPCMethod.storageGet, Array("nope".utf8)), package: "app")?.1 == [], "missing: no records")
+    #expect(await ask(h, call(RPCMethod.storageGet, Array("score".utf8)), package: "other")?.1 == [], "per package")
+    #expect(await ask(h, call(RPCMethod.storageDelete, Array("score".utf8)), package: "app")?.0 == .ok)
+    #expect(h.state.storage.get("app", "score") == nil)
+    #expect(await ask(h, call(RPCMethod.storageGet, Array("a/b".utf8)), package: "app")?.0 == .badRequest)
+    #expect(h.asked.isEmpty, "no cap")
+}
+
+@Test func rpcStorageQuota() throws {
+    let s = KeyValueStore(root: FileManager.default.temporaryDirectory.appendingPathComponent("quota-\(UUID().uuidString)"))
+    try s.put("p", "a", Data(count: 40_000))
+    #expect(throws: RPCStatus.tooLarge) { try s.put("p", "b", Data(count: 30_000)) }
+    try s.put("p", "a", Data(count: 60_000)) // replacing counts the new size only
+    #expect(s.used("p") == 60_001)
+    try s.put("q", "b", Data(count: 30_000)) // another package has its own quota
+    s.clear("p")
+    #expect(s.get("p", "a") == nil && s.get("q", "b") != nil)
 }

@@ -659,6 +659,7 @@ object AppUpdates {
             Analytics.track("app_removed", mapOf("app" to name))
             // as phones do on uninstall: a reinstall asks again
             Grants(context).reset(name)
+            appStorage(context).clear(name) // its data on the phone goes with it; Reset permissions keeps it
             model.check()
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e

@@ -40,7 +40,7 @@ Capabilities:
 
 | Cap | Methods | OS permission |
 |---|---|---|
-| (none) | `caps` | — |
+| (none) | `caps`, `storage.*` | — |
 | `calendar` | `calendar.events` | EventKit full access (iOS 17+ `requestFullAccessToEvents`); `READ_CALENDAR` |
 | `location` | `location` | When In Use, reduced accuracy is enough; `ACCESS_COARSE_LOCATION` |
 | `weather` | `weather` | the same as `location` (the phone needs it; the watch gets no position) |
@@ -85,7 +85,17 @@ Reply (phone → watch):
   `KSession.send` (it retries `FULL`/`PAUSED`), so the app drains `recv` in its loop.
 - Empty result or any error: one message, `index` 0, `total` 0, no record.
 - The phone handles one request at a time, in order of arrival, and keeps no state per request, except the parts of
-  an `http.request` not joined yet (one per package).
+  a multi-part request (`http.request`, `storage.put`) not joined yet: one per package, whatever its method.
+
+### Multi-part requests
+
+A request whose args don't fit one message comes as one or more `R1Q` with the same `id` and method, args
+`index:u8 ‖ total:u8 ‖ chunk` (`chunk` ≤ 121 bytes, `total` 1–9, `index` 0…total−1 in order). The phone joins the
+chunks per package and answers only after the last part; parts before it get no reply. `BAD_REQUEST`, and the
+joined bytes so far are dropped, for: a part out of order (the first one not `index` 0, a gap, a repeat, a `total`
+that changes), a part with a new `id` or another multi-part method before the last part of the open one (the new
+part is refused; the app sends its request again from `index` 0), `total` 0 or over 9. Single-message methods in
+between don't touch the open request. The joined payload is at most 9 × 121 = 1089 bytes.
 - No answer at all (phone asleep, out of range, companion not running): the app shows its cached copy (`store`,
   4 KiB) and asks again after 3 s, then less often.
 
@@ -96,7 +106,7 @@ Reply (phone → watch):
 | 2 `DENIED` | the user denied the cap, or its OS permission is off |
 | 3 `UNAVAILABLE` | the phone cannot answer now: no location fix, network down or timeout, iOS notifications |
 | 4 `ASK` | the user has not answered yet; the phone asked. Show "Allow on your phone" |
-| 5 `TOO_LARGE` | `http.get` / `http.request` body over 2048 bytes |
+| 5 `TOO_LARGE` | `http.get` / `http.request` body over 2048 bytes; `storage.put` over the package's quota |
 
 Text fields are UTF-8, cut by the phone to at most the stated size, at a character boundary (`utf8_cut` vectors:
 64 Cyrillic-only bytes stay 64).
@@ -113,11 +123,15 @@ Characters the watch has no glyph for stay as they are (they draw as `?`).
 | `0x40` | `http.get` | `http:<host>` |
 | `0x41` | `http.request` | `http:<host>` |
 | `0x50` | `notifications` | `notifications` |
+| `0x60` | `storage.get` | — |
+| `0x61` | `storage.put` | — |
+| `0x62` | `storage.delete` | — |
 
 ### `0x01 caps`
 
 Args: none. One record: the method ids this package may call now (granted and OS permission on), one byte each,
-without `0x01` itself; `0x40` and `0x41` when any host is granted.
+without `0x01` itself; `0x40` and `0x41` when any host is granted; the methods without a cap (`0x60`–`0x62`) always,
+after the others.
 A miniapp calls it at start to tell "allow on your phone" from an empty result.
 
 ### `0x10 calendar.events`
@@ -184,20 +198,8 @@ Any HTTP code is `OK` with that code; a body over 2048 bytes is `TOO_LARGE`; no 
 
 ### `0x41 http.request`
 
-Any method, with a body, for an app that changes data on its server. The request is too big for one message, so it
-comes in parts: one or more `R1Q` with the same `id` and method `0x41`, args
-
-```
-index:u8 ‖ total:u8 ‖ chunk
-```
-
-`chunk` ≤ 121 bytes, `total` 1–9, `index` 0…total−1 in order. The phone joins the chunks of one id per package and
-answers only after the last part; parts before it get no reply. `BAD_REQUEST` (and the joined bytes so far are
-dropped) for: a part out of order (the first one not `index` 0, a gap, a repeat, a `total` that changes), a part with
-a new `id` before the last part of the open one (the new part is refused; the app sends its request again from
-`index` 0), `total` 0 or over 9. Other methods in between don't touch the open request.
-
-The joined payload (`http_request` vectors):
+Any method, with a body, for an app that changes data on its server. A multi-part request (see "Multi-part
+requests"); the joined payload (`http_request` vectors):
 
 ```
 method:u8 ‖ url_len:u8 ‖ url ‖ body
@@ -224,6 +226,22 @@ watch, and the phone never logs them.
 - **Cookies.** A jar per (package, host): what the host sets comes back on the next request. In memory, so a login
   by cookie lasts while the companion runs. On iOS, cookies set on a redirect's own response are not kept.
 - Reset permissions and Delete from the Watch clear both.
+
+### `0x60 storage.get`, `0x61 storage.put`, `0x62 storage.delete`
+
+A key/value store per package on the phone, so an app isn't limited to the watch's 4 KiB. No cap: an app reads and
+writes only its own keys. A key is 1–16 bytes of `A–Z a–z 0–9 . _ -`; any other key is `BAD_REQUEST` (`storage.keys`
+vectors).
+
+- `storage.get`: args the key. The value as `length:u16`, then the value in chunks of 121 bytes (`storage.get`
+  vectors); a key with no value: `OK` with no records.
+- `storage.put`: a multi-part request; joined payload `key_len:u8 ‖ key ‖ value`, so a value of up to
+  1088 − key_len bytes (`storage.put` vectors). `OK`, no records. Replaces the old value.
+- `storage.delete`: args the key. `OK`, no records, also for a key with no value.
+
+Quota: 64 KiB per package, keys and values counted together; a put that would go over it is `TOO_LARGE` and keeps
+the old value. Kept in the app's own files, out of backups (iOS Application Support excluded from backup, Android
+`noBackupFilesDir`), one file per key. Delete from the Watch clears the package's store; Reset permissions doesn't.
 
 ### `0x50 notifications`
 
