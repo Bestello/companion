@@ -47,6 +47,9 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.background
 import android.content.Intent
+import android.os.Build
+import android.provider.Settings
+import androidx.compose.ui.platform.LocalConfiguration
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
@@ -756,6 +759,8 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
                         HorizontalDivider()
                     }
                     NavRow(stringResource(R.string.developer_options), onClick = { nav.developer = true }) { IconTile(Icons.Default.Build, Color(0xFF757575)) }
+                    HorizontalDivider()
+                    LanguageRow()
                 }
             }
             item {
@@ -812,6 +817,23 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
     deleteError?.let {
         AlertDialog(onDismissRequest = { deleteError = null }, title = { Text(stringResource(R.string.delete_account_failed)) },
             text = { Text(it) }, confirmButton = { TextButton({ deleteError = null }) { Text(stringResource(R.string.ok)) } })
+    }
+}
+
+/** The app's language, set in the system's per-app language page (Android 13+), else the app's settings page. */
+@Composable
+private fun LanguageRow() {
+    val context = LocalContext.current
+    val locale = LocalConfiguration.current.locales[0]
+    Row(Modifier.fillMaxWidth().clickable {
+        val uri = Uri.fromParts("package", context.packageName, null)
+        context.startActivity(Intent(if (Build.VERSION.SDK_INT >= 33) Settings.ACTION_APP_LOCALE_SETTINGS
+            else Settings.ACTION_APPLICATION_DETAILS_SETTINGS, uri))
+    }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        IconTile(painterResource(R.drawable.ic_public), Color(0xFF757575))
+        Text(stringResource(R.string.language), Modifier.weight(1f))
+        Text(locale.getDisplayLanguage(locale).replaceFirstChar { it.titlecase(locale) }, color = Fmc.secondary)
+        Icon(painterResource(R.drawable.ic_open_in_new), null, tint = Fmc.secondary)
     }
 }
 

@@ -69,6 +69,7 @@
     <string name="connect_to_see_faces">Підключіться, щоб побачити циферблати на годиннику.</string>
     <string name="firmware">Прошивка</string>
     <string name="developer_options">Для розробників</string>
+    <string name="language">Мова</string>
     <string name="settings">Налаштування</string>
     <string name="services_footer">Застосунки для годинника просять доступ до календаря, геолокації, погоди, сповіщень або сайту. Кожен запит ви підтверджуєте на вкладці «Застосунки».</string>
     <string name="services_switch">Сервіси для застосунків годинника</string>

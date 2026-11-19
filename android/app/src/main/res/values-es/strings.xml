@@ -69,6 +69,7 @@
     <string name="connect_to_see_faces">Conéctate para ver las esferas del reloj.</string>
     <string name="firmware">Firmware</string>
     <string name="developer_options">Desarrollador</string>
+    <string name="language">Idioma</string>
     <string name="settings">Ajustes</string>
     <string name="services_footer">Las apps del reloj piden tu calendario, ubicación, el tiempo, notificaciones o un sitio web. Respondes a cada una en la pestaña Apps.</string>
     <string name="services_switch">Servicios para apps del reloj</string>

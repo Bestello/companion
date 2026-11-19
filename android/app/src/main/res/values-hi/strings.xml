@@ -69,6 +69,7 @@
     <string name="connect_to_see_faces">घड़ी के फ़ेस देखने के लिए कनेक्ट करें।</string>
     <string name="firmware">फ़र्मवेयर</string>
     <string name="developer_options">डेवलपर</string>
+    <string name="language">भाषा</string>
     <string name="settings">सेटिंग</string>
     <string name="services_footer">घड़ी ऐप आपका कैलेंडर, लोकेशन, मौसम, सूचनाएँ या कोई वेबसाइट माँगते हैं। हर एक का जवाब आप ऐप्स टैब पर देते हैं।</string>
     <string name="services_switch">घड़ी ऐप के लिए सेवाएँ</string>

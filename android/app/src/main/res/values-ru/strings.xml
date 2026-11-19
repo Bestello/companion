@@ -69,6 +69,7 @@
     <string name="connect_to_see_faces">Подключитесь, чтобы увидеть циферблаты на часах.</string>
     <string name="firmware">Прошивка</string>
     <string name="developer_options">Для разработчиков</string>
+    <string name="language">Язык</string>
     <string name="settings">Настройки</string>
     <string name="services_footer">Приложения для часов просят доступ к календарю, геолокации, погоде, уведомлениям или сайту. Каждый запрос вы подтверждаете на вкладке «Приложения».</string>
     <string name="services_switch">Сервисы для приложений часов</string>

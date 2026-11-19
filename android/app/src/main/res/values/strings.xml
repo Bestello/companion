@@ -75,6 +75,7 @@
     <string name="connect_to_see_faces">Connect to see the faces on the watch.</string>
     <string name="firmware">Firmware</string>
     <string name="developer_options">Developer</string>
+    <string name="language">Language</string>
     <string name="settings">Settings</string>
     <string name="services_footer">Watch apps ask for your calendar, location, weather, notifications or a website. You answer each one on the Apps tab.</string>
     <string name="services_switch">Services for watch apps</string>
