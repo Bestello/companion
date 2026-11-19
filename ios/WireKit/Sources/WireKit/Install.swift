@@ -4,9 +4,7 @@ import Foundation
 
 public let loaderSlot = 0xFF
 
-/// App slots on the watch, 0…n−1: 8 before stub 7, 16 from stub 7.
-/// TODO(app-order): stub 7 and its 16 slots come from the cmf-watch-sdk branch app-order (docs/app-order.md and the
-/// stub's docs there, not written yet); check this against them when they are.
+/// App slots on the watch, 0…n−1: 8 before stub 7, 16 from stub 7 (cmf-watch-sdk docs/app-order.md, "The table").
 public func appSlots(stub: UInt32) -> Int { stub >= 7 ? 16 : 8 }
 
 /// The stub's release from INFO on 0xFE; 1 when the reply doesn't say.
