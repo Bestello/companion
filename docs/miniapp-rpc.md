@@ -47,6 +47,7 @@ Capabilities:
 | `weather` | `weather` | the same as `location` (the phone needs it; the watch gets no position) |
 | `http:<host>` | `http.get` and `http.request` to that host | — |
 | `notifications` | `notifications` | Android: notification listener access. iOS: none possible, the method answers `UNAVAILABLE` |
+| `media` | `media.now_playing`, `media.control` | Android: notification listener access (the same switch as `notifications`). iOS: none possible, the methods answer `UNAVAILABLE` |
 | `notify` | `notify` | iOS: notification authorization (a turned-off one drops it silently); Android: `POST_NOTIFICATIONS` |
 
 Flow:
@@ -132,6 +133,8 @@ Characters the watch has no glyph for stay as they are (they draw as `?`).
 | `0x61` | `storage.put` | — |
 | `0x62` | `storage.delete` | — |
 | `0x70` | `phone.battery` | — |
+| `0x80` | `media.now_playing` | `media` |
+| `0x81` | `media.control` | `media` |
 
 ### `0x01 caps`
 
@@ -294,6 +297,26 @@ records. At most one per 10 s per package; another one sooner is `UNAVAILABLE` (
   medical and safety apps, and a backgrounded app can't play its own audio.
 
 Tapping one opens the app's page in the companion.
+
+### `0x80 media.now_playing`, `0x81 media.control`
+
+Android only: the active media session, through `MediaSessionManager.getActiveSessions` with the companion's
+notification listener. iOS answers `UNAVAILABLE` to both and `caps` never lists them: an app can't read or drive
+another app's player there (MPNowPlayingInfoCenter is the app's own; MPMusicPlayerController only the Music app's
+queue).
+
+`media.now_playing`: args none. The session that plays, else the first active one; none: `OK` with no records. One
+record (`media` vectors):
+
+```
+flags:u8 ‖ position:u16 ‖ duration:u16 ‖ app_len:u8 ‖ app ‖ title_len:u8 ‖ title ‖ artist
+```
+
+`flags` bit 0 playing. `position` and `duration` in seconds, `0xFFFF` unknown (a live stream). `app` the player's
+label ≤ 24 bytes, `title` ≤ 48, `artist` ≤ 32. Track names are not behind "Show text on the watch".
+
+`media.control`: args `action:u8`: 0 play, 1 pause, 2 play/pause, 3 next, 4 previous; other values `BAD_REQUEST`.
+`OK`, no records; no session: `UNAVAILABLE`.
 
 ### `0x70 phone.battery`
 

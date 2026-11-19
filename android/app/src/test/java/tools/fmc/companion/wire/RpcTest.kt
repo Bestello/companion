@@ -286,4 +286,19 @@ class RpcTest {
         assertEquals(RpcStatus.UNAVAILABLE, status(answer("a", hex("523151011103"), p)), "Android has no reminders")
         assertEquals(emptyList(), p.asked, "and asks nothing")
     }
+
+    @Test fun media() = runBlocking {
+        each("media") { t ->
+            val i = t.getJSONObject("in")
+            fun opt(k: String) = if (i.isNull(k)) null else i.getLong(k)
+            assertEquals(t.getString("hex"), mediaRecord(NowPlaying(i.getBoolean("playing"), opt("position"), opt("duration"),
+                i.getString("app"), i.getString("title"), i.getString("artist"))).hex())
+        }
+        val p = FakePhone()
+        assertEquals(RpcStatus.ASK, status(answer("a", hex("5231510180"), p)))
+        assertEquals(listOf("a media"), p.asked)
+        p.grants["media"] = true
+        assertEquals(RpcStatus.OK, status(answer("a", hex("523151018102"), p)))
+        assertEquals(RpcStatus.BAD_REQUEST, status(answer("a", hex("523151018105"), p)), "no action 5")
+    }
 }

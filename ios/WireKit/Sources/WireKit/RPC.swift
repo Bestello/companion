@@ -14,6 +14,7 @@ public enum RPCMethod {
     public static let http: UInt8 = 0x40, httpRequest: UInt8 = 0x41, notifications: UInt8 = 0x50
     public static let storageGet: UInt8 = 0x60, storagePut: UInt8 = 0x61, storageDelete: UInt8 = 0x62
     public static let battery: UInt8 = 0x70, notify: UInt8 = 0x51
+    public static let media: UInt8 = 0x80, mediaControl: UInt8 = 0x81
     /// No cap: in `caps` always, after the others.
     public static let free: [UInt8] = [storageGet, storagePut, storageDelete, battery]
     /// Methods whose request comes in parts (`index ‖ total ‖ chunk`).
@@ -307,6 +308,24 @@ public func parseAlert(_ d: Data) -> PhoneAlert? {
     return PhoneAlert(title: title, body: body, sound: b[0] & 1 != 0, find: b[0] & 2 != 0)
 }
 
+/// What plays on the phone (Android). Seconds; nil unknown.
+public struct NowPlaying: Equatable, Sendable {
+    public var playing: Bool, position: Int?, duration: Int?, app: String, title: String, artist: String
+    public init(playing: Bool, position: Int?, duration: Int?, app: String, title: String, artist: String) {
+        (self.playing, self.position, self.duration, self.app, self.title, self.artist) = (playing, position, duration, app, title, artist)
+    }
+}
+
+/// `flags:u8 ‖ position:u16 ‖ duration:u16 ‖ app_len:u8 ‖ app ‖ title_len:u8 ‖ title ‖ artist`; flags bit 0
+/// playing, seconds with 0xFFFF unknown, app ≤ 24, title ≤ 48, artist ≤ 32 bytes.
+public func mediaRecord(_ n: NowPlaying) -> Data {
+    let app = utf8Cut(n.app, 24), title = utf8Cut(n.title, 48)
+    var d = Data([n.playing ? 1 : 0])
+    d.u16(n.position.map { min($0, 0xFFFE) } ?? 0xFFFF)
+    d.u16(n.duration.map { min($0, 0xFFFE) } ?? 0xFFFF)
+    return d + [UInt8(app.count)] + app + [UInt8(title.count)] + title + utf8Cut(n.artist, 32)
+}
+
 public struct PhoneNotification: Equatable, Sendable {
     public var ageMin: Int, app: String, text: String
     public init(ageMin: Int, app: String, text: String) { (self.ageMin, self.app, self.text) = (ageMin, app, text) }
@@ -458,6 +477,9 @@ public func answer(_ message: Data, package: String?, host: any RPCHost,
     case RPCMethod.storageDelete:
         host.state.storage.delete(package, try storageKey(args))
         return []
+    case RPCMethod.media, RPCMethod.mediaControl:
+        // iOS can't read or drive other apps' players (docs/miniapp-rpc.md)
+        throw RPCStatus.unavailable
     case RPCMethod.notify:
         guard let alert = parseAlert(args) else { throw RPCStatus.badRequest }
         try permit("notify")

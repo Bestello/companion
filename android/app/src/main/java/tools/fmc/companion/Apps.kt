@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Email
 import tools.fmc.companion.wire.setOrder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.AlertDialog
@@ -427,7 +428,7 @@ fun AppScreen(model: AppModel, value: String, open: (String) -> Unit, back: () -
     fun askOs(cap: String) {
         if (osAllows(context, cap)) return
         osPermission(cap)?.let { return ask.launch(it) }
-        if (cap == "notifications") context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+        if (cap == "notifications" || cap == "media") context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
             .putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
                 ComponentName(context, NotificationWatcher::class.java).flattenToString()))
     }
@@ -609,6 +610,7 @@ fun capTitle(cap: String) = when (cap) {
     "weather" -> "Weather"
     "notifications" -> "Notifications"
     "notify" -> "Send notifications"
+    "media" -> "Media"
     else -> cap.removePrefix("http:")
 }
 
@@ -619,6 +621,7 @@ private fun CapTile(cap: String) = when (cap) {
     "weather" -> IconTile(painterResource(R.drawable.ic_cloud), Color(0xFF00ACC1))
     "notifications" -> IconTile(Icons.Default.Notifications, Color(0xFFE53935))
     "notify" -> IconTile(Icons.Default.Notifications, Color(0xFFFB8C00))
+    "media" -> IconTile(Icons.Default.PlayArrow, Color(0xFFD81B60))
     else -> IconTile(painterResource(R.drawable.ic_public), Color(0xFF757575))
 }
 

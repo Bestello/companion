@@ -30,6 +30,9 @@ import tools.fmc.companion.wire.HttpCall
 import tools.fmc.companion.wire.KeyValueStore
 import tools.fmc.companion.wire.RpcState
 import tools.fmc.companion.wire.httpHost
+import tools.fmc.companion.wire.MediaAction
+import tools.fmc.companion.wire.NowPlaying
+import tools.fmc.companion.wire.mediaRecord
 import tools.fmc.companion.wire.parseAlert
 import tools.fmc.companion.wire.parseHttpCall
 import tools.fmc.companion.wire.requestHeaders
@@ -72,6 +75,8 @@ class PhoneServices(private val context: Context, private val grants: Grants) : 
             Method.HTTP -> http(pkg, HttpCall("GET", String(args), httpHost(args)!!))
             Method.HTTP_REQUEST -> http(pkg, parseHttpCall(args)!!)
             Method.NOTIFICATIONS -> NotificationWatcher.records(context, args.u8(0).coerceIn(1, 10), show)
+            Method.MEDIA -> nowPlaying()?.let { listOf(mediaRecord(it)) } ?: emptyList()
+            Method.MEDIA_CONTROL -> emptyList<ByteArray>().also { control(args.u8(0)) }
             Method.NOTIFY -> emptyList<ByteArray>().also { postAlert(context, pkg, parseAlert(args)!!) }
             Method.BATTERY -> context.getSystemService(android.os.BatteryManager::class.java).let { b ->
                 val level = b.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
@@ -81,6 +86,42 @@ class PhoneServices(private val context: Context, private val grants: Grants) : 
                 listOf(batteryRecord(level, plugged != 0))
             }
             else -> throw RpcError(RpcStatus.BAD_REQUEST)
+        }
+    }
+
+    /** The session that plays, else the first one; needs the notification listener (osAllows "media"). */
+    private fun session(): android.media.session.MediaController? = runCatching {
+        context.getSystemService(android.media.session.MediaSessionManager::class.java)
+            .getActiveSessions(android.content.ComponentName(context, NotificationWatcher::class.java))
+    }.getOrNull()?.let { list -> list.firstOrNull { it.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING } ?: list.firstOrNull() }
+
+    private fun nowPlaying(): NowPlaying? {
+        val c = session() ?: return null
+        val s = c.playbackState
+        val m = c.metadata
+        val playing = s?.state == android.media.session.PlaybackState.STATE_PLAYING
+        // the position as of the last update, moved on by the time since while it plays
+        val pos = s?.position?.takeIf { it >= 0 }?.let {
+            if (playing) it + ((SystemClock.elapsedRealtime() - s.lastPositionUpdateTime) * s.playbackSpeed).toLong() else it
+        }
+        val dur = m?.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION)?.takeIf { it > 0 }
+        val pm = context.packageManager
+        val app = runCatching { pm.getApplicationLabel(pm.getApplicationInfo(c.packageName, 0)).toString() }.getOrDefault(c.packageName)
+        return NowPlaying(playing, pos?.div(1000), dur?.div(1000), app,
+            m?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE).orEmpty(),
+            m?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST).orEmpty())
+    }
+
+    private fun control(action: Int) {
+        val c = session() ?: throw RpcError(RpcStatus.UNAVAILABLE)
+        val t = c.transportControls
+        val playing = c.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+        when (action) {
+            MediaAction.PLAY -> t.play()
+            MediaAction.PAUSE -> t.pause()
+            MediaAction.TOGGLE -> if (playing) t.pause() else t.play()
+            MediaAction.NEXT -> t.skipToNext()
+            else -> t.skipToPrevious()
         }
     }
 

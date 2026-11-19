@@ -30,6 +30,8 @@ object Method {
     const val STORAGE_DELETE = 0x62
     const val BATTERY = 0x70
     const val NOTIFY = 0x51
+    const val MEDIA = 0x80
+    const val MEDIA_CONTROL = 0x81
 
     /** No cap: in `caps` always, after the others. */
     val FREE = listOf(STORAGE_GET, STORAGE_PUT, STORAGE_DELETE, BATTERY)
@@ -163,6 +165,30 @@ fun parseAlert(d: ByteArray): PhoneAlert? {
     return PhoneAlert(title, body, d.u8(0) and 1 != 0, d.u8(0) and 2 != 0)
 }
 
+/** media.control's action. */
+object MediaAction {
+    const val PLAY = 0
+    const val PAUSE = 1
+    const val TOGGLE = 2
+    const val NEXT = 3
+    const val PREVIOUS = 4
+}
+
+/** What plays on the phone. Seconds; null unknown. */
+data class NowPlaying(val playing: Boolean, val position: Long?, val duration: Long?, val app: String, val title: String, val artist: String)
+
+/** `flags:u8 ‖ position:u16 ‖ duration:u16 ‖ app_len:u8 ‖ app ‖ title_len:u8 ‖ title ‖ artist`; flags bit 0 playing,
+ *  seconds with 0xFFFF unknown, app ≤ 24, title ≤ 48, artist ≤ 32 bytes. */
+fun mediaRecord(n: NowPlaying): ByteArray {
+    val app = utf8Cut(n.app, 24)
+    val title = utf8Cut(n.title, 48)
+    return buf {
+        u8(if (n.playing) 1 else 0)
+        le16(n.position?.coerceIn(0, 0xFFFE)?.toInt() ?: 0xFFFF); le16(n.duration?.coerceIn(0, 0xFFFE)?.toInt() ?: 0xFFFF)
+        u8(app.size); add(app); u8(title.size); add(title); add(utf8Cut(n.artist, 32))
+    }
+}
+
 /** `level:u8 ‖ flags:u8`, level 0..100, flags bit 0 plugged in. */
 fun batteryRecord(level: Int, charging: Boolean): ByteArray = bytes(level.coerceIn(0, 100), if (charging) 1 else 0)
 
@@ -249,6 +275,8 @@ fun capOf(method: Int, args: ByteArray): String? = when (method) {
     Method.NOTIFICATIONS -> "notifications".takeIf { args.size == 1 }
     Method.BATTERY -> "" // no cap
     Method.NOTIFY -> parseAlert(args)?.let { "notify" }
+    Method.MEDIA -> "media"
+    Method.MEDIA_CONTROL -> "media".takeIf { args.size == 1 && args.u8(0) <= MediaAction.PREVIOUS }
     else -> null
 }
 
@@ -278,7 +306,8 @@ suspend fun answer(pkg: String, msg: ByteArray, phone: Phone, budgetMs: Long = 7
     fun ok(cap: String) = grants[cap] == true && phone.osAllows(cap)
     if (method == Method.CAPS) {
         val fixed = listOf(Method.CALENDAR to "calendar", Method.LOCATION to "location", Method.WEATHER to "weather",
-            Method.NOTIFICATIONS to "notifications", Method.NOTIFY to "notify").filter { ok(it.second) }.map { it.first }
+            Method.NOTIFICATIONS to "notifications", Method.NOTIFY to "notify", Method.MEDIA to "media",
+            Method.MEDIA_CONTROL to "media").filter { ok(it.second) }.map { it.first }
         val http = if (grants.any { it.key.startsWith("http:") && it.value }) listOf(Method.HTTP, Method.HTTP_REQUEST) else emptyList()
         return replies(r.id, RpcStatus.OK, listOf(((fixed + http).sorted() + Method.FREE).map { it.toByte() }.toByteArray()))
     }

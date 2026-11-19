@@ -71,6 +71,11 @@ struct RPCVectors: Decodable {
         let ids: [ID]; let records: [Rec]; let order: Order
     }
     let reminders: Reminders
+    struct Media: Decodable {
+        struct In: Decodable { let playing: Bool; let position: Int?; let duration: Int?; let app: String; let title: String; let artist: String }
+        let `in`: In; let hex: String
+    }
+    let media: [Media]
     let notifications: [Notif]
     let replies: [Reply]
 
@@ -435,4 +440,16 @@ let storageIDs = Data(RPCMethod.free)
     #expect(!h.todo.contains { $0.title == "e" })
     #expect(await ask(h, call(RPCMethod.reminderDone, Array(id)))?.0 == .badRequest, "no such reminder now")
     #expect(await ask(h, call(RPCMethod.caps))?.1 == [Data([RPCMethod.reminders, RPCMethod.reminderDone]) + storageIDs])
+}
+
+@Test @MainActor func rpcMedia() async {
+    for m in rv.media {
+        let i = m.in
+        #expect(mediaRecord(NowPlaying(playing: i.playing, position: i.position, duration: i.duration, app: i.app,
+                                       title: i.title, artist: i.artist)) == hex(m.hex), "\(i.title)")
+    }
+    let h = FakeHost()
+    #expect(await ask(h, call(RPCMethod.media))?.0 == .unavailable, "iOS has no other apps' players")
+    #expect(await ask(h, call(RPCMethod.mediaControl, [2]))?.0 == .unavailable)
+    #expect(h.asked.isEmpty)
 }

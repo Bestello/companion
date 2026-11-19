@@ -24,6 +24,8 @@ It counts anonymous usage events (see below).
   the watch over Bluetooth. They are not sent anywhere else.
 - **Reminders (iPhone).** When you allow a watch app to use your reminders, the incomplete ones are read on the
   phone and sent to the watch, titles only if you turn on "Show text on the watch". The app can mark one done.
+- **What plays (Android).** When you allow a watch app to use media, the title, artist and player of what plays on
+  the phone go to the watch, and the watch can play, pause and skip.
 - **Notifications (Android).** When you allow a watch app to use notifications, their text is sent only to the watch.
 
 ## What leaves the phone

@@ -82,6 +82,7 @@ fun capLabel(cap: String) = when (cap) {
     "weather" -> "the weather where you are"
     "notifications" -> "your notifications"
     "notify" -> "to send you notifications"
+    "media" -> "what plays on your phone, and to control it"
     else -> "data from ${cap.removePrefix("http:")}"
 }
 
@@ -94,7 +95,8 @@ fun osPermission(cap: String) = when (cap) {
 }
 
 fun osAllows(context: Context, cap: String): Boolean = when {
-    cap == "notifications" -> context.packageName in NotificationManagerCompat.getEnabledListenerPackages(context)
+    // media sessions of other apps need the notification listener too
+    cap == "notifications" || cap == "media" -> context.packageName in NotificationManagerCompat.getEnabledListenerPackages(context)
     cap == "notify" -> NotificationManagerCompat.from(context).areNotificationsEnabled()
     else -> osPermission(cap)?.let { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED } ?: true
 }

@@ -705,5 +705,40 @@
     "c"
    ]
   }
- }
+ },
+ "media": [
+  {
+   "in": {
+    "playing": true,
+    "position": 83,
+    "duration": 215,
+    "app": "Spotify",
+    "title": "Bohemian Rhapsody",
+    "artist": "Queen"
+   },
+   "hex": "015300d7000753706f7469667911426f68656d69616e2052686170736f6479517565656e"
+  },
+  {
+   "in": {
+    "playing": false,
+    "position": null,
+    "duration": null,
+    "app": "YouTube Music",
+    "title": "Кино — Группа крови",
+    "artist": "Кино"
+   },
+   "hex": "00ffffffff0d596f7554756265204d7573696324d09ad0b8d0bdd0be20e2809420d093d180d183d0bfd0bfd0b020d0bad180d0bed0b2d0b8d09ad0b8d0bdd0be"
+  },
+  {
+   "in": {
+    "playing": true,
+    "position": 0,
+    "duration": 70000,
+    "app": "Podcasts",
+    "title": "A very long episode title that goes well past the forty-eight bytes",
+    "artist": "Some Show With A Long Name Too"
+   },
+   "hex": "010000feff08506f64636173747330412076657279206c6f6e6720657069736f6465207469746c65207468617420676f65732077656c6c2070617374207468536f6d652053686f7720576974682041204c6f6e67204e616d6520546f6f"
+  }
+ ]
 }
