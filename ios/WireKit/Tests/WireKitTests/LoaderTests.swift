@@ -41,15 +41,15 @@ final class FakeWatch: Requester, @unchecked Sendable {
     #expect(s.apps[2]?.name == pkg.name)
 }
 
-@Test func stubSevenReadsSixteenSlots() async throws {
+@Test func stubEightReadsSixteenSlots() async throws {
     let w = FakeWatch()
-    w.stub = Data([0, 7, 0, 0, 0, 4])
+    w.stub = Data([0, 8, 0, 0, 0, 4])
     w.used = [15: Data(header)]
     let s = try #require(try await readLoader(w))
     #expect(s.slots == 16)
     #expect(s.apps == [15: parseHeader(Data(header))!])
-    w.stub = Data([0, 6, 0, 0, 0, 4])
-    #expect(try await readLoader(w)?.apps == [:], "stub 6: slot 15 isn't read")
+    w.stub = Data([0, 7, 0, 0, 0, 4])
+    #expect(try await readLoader(w)?.apps == [:], "stub 7: slot 15 isn't read")
 }
 
 @Test func garbledStubReplyThrows() async throws {

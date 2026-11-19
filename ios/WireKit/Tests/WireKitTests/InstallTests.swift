@@ -78,10 +78,10 @@ let header = hex(pkg.info_reply_hex).dropFirst()
     #expect(!f.calls.contains { $0.0 == Cmd.info && $0.1.first == 8 }, "stub 1: slots 0…7 only")
 }
 
-@Test func stubSevenHasSixteenSlots() async throws {
-    #expect([1, 6, 7, 8].map { appSlots(stub: $0) } == [8, 8, 16, 16])
+@Test func stubEightHasSixteenSlots() async throws {
+    #expect([1, 6, 7, 8, 9].map { appSlots(stub: $0) } == [8, 8, 8, 16, 16])
     let f = FakeInstaller()
-    f.stub = Data([0, 7, 0, 0, 0, 4])
+    f.stub = Data([0, 8, 0, 0, 0, 4])
     for i in 0..<8 {
         var h = Data(header)
         h[8] = UInt8(ascii: "a") + UInt8(i)
@@ -140,5 +140,5 @@ private struct PushVectors: Decodable {
     for h in p.http_widget {
         #expect(jobWidget(h.records.map(hex)) == (h.none == true ? nil : widgetRecord(title: h.title!, value: h.value!)))
     }
-    #expect([6, 7].map { canPush(stub: $0) } == [false, true])
+    #expect([6, 7, 8].map { canPush(stub: $0) } == [false, false, true])
 }

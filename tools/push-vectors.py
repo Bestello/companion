@@ -1,4 +1,4 @@
-# push-vectors.json: PUSH (stub 7, cmf-watch-sdk docs/widget-push.md) as the phone sends it for a watch app's
+# push-vectors.json: PUSH (stub 8, cmf-watch-sdk docs/widget-push.md) as the phone sends it for a watch app's
 # background jobs. The widget record comes from the SDK's own install.widget_record (needs the SDK's venv: pycryptodome).
 #   CMF_SDK=~/.herdr/worktrees/cmf-watch-sdk/app-order $CMF_SDK/.venv/bin/python tools/push-vectors.py > ios/WireKit/Tests/WireKitTests/push-vectors.json
 import json, os, sys

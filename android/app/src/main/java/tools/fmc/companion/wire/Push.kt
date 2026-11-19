@@ -1,6 +1,6 @@
 package tools.fmc.companion.wire
 
-// PUSH (stub 7, cmf-watch-sdk docs/widget-push.md): the phone writes a watch app's widget card or start blob while
+// PUSH (stub 8, cmf-watch-sdk docs/widget-push.md): the phone writes a watch app's widget card or start blob while
 // the app doesn't run. Used for its background jobs (docs/miniapp-rpc.md, job.set). Port of WireKit Push.swift.
 
 /** What a PUSH writes: the widget card's 64-byte record, or the blob the app gets as its first message at start. */
@@ -13,12 +13,12 @@ sealed class PushResult {
     data object Ok : PushResult()
     /** Written less than 60 s ago; nothing written, retry after [ms]. */
     data class Later(val ms: Long) : PushResult()
-    /** NoApp (7), BadRequest (1, also every stub before 7), Io (2); 0xFF for an empty reply. */
+    /** NoApp (7), BadRequest (1, also every stub before 8), Io (2); 0xFF for an empty reply. */
     data class Refused(val status: Int) : PushResult()
 }
 
-/** From stub 7 on; older stubs answer BadRequest. */
-fun canPush(stub: Long) = stub >= 7
+/** From stub 8 on; older stubs answer BadRequest. */
+fun canPush(stub: Long) = stub >= 8
 
 /** title ≤ 23 bytes at 0, value ≤ 39 bytes at 24 (0A starts a second line), NUL-padded to 64. */
 fun widgetRecord(title: String, value: String): ByteArray = utf8Cut(title, 23).copyOf(24) + utf8Cut(value, 39).copyOf(40)

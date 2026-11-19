@@ -44,7 +44,7 @@ next read of the watch. Update App Loader installs the patched loader too, and t
 loader CRC with that, so an ordered loader doesn't read as outdated. A store loader without the table (older than the
 feature) can't carry the order: it stays on the phone.
 
-The stub has 8 app slots before version 7 and 16 from it (`appSlots(stub:)` in WireKit, `appSlots` in the Android
+The stub has 8 app slots before version 8 and 16 from it (`appSlots(stub:)` in WireKit, `appSlots` in the Android
 wire). The version is INFO on slot `0xFE`; `readLoader`, `installed` and `install` read that many.
 
 ## What the phone keeps for watch apps
@@ -55,7 +55,7 @@ wire). The version is INFO on slot `0xFE`; `readLoader`, `installed` and `instal
   `noBackupFilesDir/storage`; `KeyValueStore` in WireKit and the wire. Delete from the Watch clears it, Reset
   permissions doesn't (it is the app's data, not an answer of the user's).
 - Background jobs (0x90): `Jobs` (UserDefaults "rpc-jobs" / prefs "jobs"), run by `RPCListener` / `RpcService` while
-  the link is up, delivered with the stub's `PUSH` (stub 7+, cmf-watch-sdk `docs/widget-push.md`) into the app's
+  the link is up, delivered with the stub's `PUSH` (stub 8+, cmf-watch-sdk `docs/widget-push.md`) into the app's
   widget card or start blob. Reset permissions and Delete from the Watch clear them.
 
 What one platform can't do answers `UNAVAILABLE` there and stays out of `caps`: notifications, media on iOS,

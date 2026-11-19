@@ -68,9 +68,9 @@ class InstallTest {
         assertTrue(f.calls.none { it.first == Cmd.INFO && it.second.u8(0) == 8 }, "stub 1: slots 0..7 only")
     }
 
-    @Test fun stubSevenHasSixteenSlots() = runBlocking {
-        assertEquals(listOf(8, 8, 16, 16), listOf(1L, 6L, 7L, 8L).map { appSlots(it) })
-        val f = FakeInstaller().apply { stub = bytes(0, 7, 0, 0, 0, 4) }
+    @Test fun stubEightHasSixteenSlots() = runBlocking {
+        assertEquals(listOf(8, 8, 8, 16, 16), listOf(1L, 6L, 7L, 8L, 9L).map { appSlots(it) })
+        val f = FakeInstaller().apply { stub = bytes(0, 8, 0, 0, 0, 4) }
         for (i in 0 until 8) f.used[i] = namedHeader('a' + i)
         assertEquals(8, install(f, pkgHex) {}, "the first free slot past 7")
         for (i in 8 until 16) f.used[i] = namedHeader('a' + i)
@@ -114,7 +114,7 @@ class InstallTest {
             val want = if (it.optBoolean("none")) null else widgetRecord(it.getString("title"), it.getString("value")).hex()
             assertEquals(want, jobWidget(recs(it))?.hex(), it.toString())
         }
-        assertEquals(listOf(false, true), listOf(6L, 7L).map(::canPush))
+        assertEquals(listOf(false, false, true), listOf(6L, 7L, 8L).map(::canPush))
     }
 
     @Test fun bytesHelpers() {

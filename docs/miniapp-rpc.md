@@ -324,8 +324,8 @@ label ≤ 24 bytes, `title` ≤ 48, `artist` ≤ 32. Track names are not behind 
 
 Background refresh for a widget or page: the app registers a job, and the phone runs its request every N minutes
 while the app isn't running, then writes the result to the watch for it with the stub's `PUSH` (cmf-watch-sdk
-`docs/widget-push.md`, stub 7 and later): into the app's widget card, or into the blob the app gets as its first
-message when it starts. On a stub before 7 the phone runs the job and drops the result (DevLog says so).
+`docs/widget-push.md`, stub 8 and later): into the app's widget card, or into the blob the app gets as its first
+message when it starts. On a stub before 8 the phone runs the job and drops the result (DevLog says so).
 
 `job.set`: a multi-part request; joined payload (`jobs` vectors):
 
@@ -363,7 +363,7 @@ The app's page lists its jobs ("Every 30 min: GET api.example.com/rate") with a 
 Delete from the Watch delete them.
 
 `PUSH` itself, from the phone (`Push.swift` / `wire/Push.kt`): `slot ‖ kind ‖ data`, reply `00` ok, `0A ‖ wait:u32`
-later, `07` no app in that slot, `01` bad request or a stub before 7, `02` NAND write failed.
+later, `07` no app in that slot, `01` bad request or a stub before 8, `02` NAND write failed.
 
 When they run: on Android in the foreground service's loop (`RpcService`, at least once a minute); on iOS in
 `RPCListener`'s loop, while the app is in the foreground or woken by BLE (about 10 s). iOS has no BGAppRefreshTask

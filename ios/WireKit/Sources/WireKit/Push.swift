@@ -1,6 +1,6 @@
 import Foundation
 
-// PUSH (stub 7, cmf-watch-sdk docs/widget-push.md): the phone writes a watch app's widget card or start blob while
+// PUSH (stub 8, cmf-watch-sdk docs/widget-push.md): the phone writes a watch app's widget card or start blob while
 // the app doesn't run. Used for its background jobs (docs/miniapp-rpc.md, job.set).
 
 /// What a PUSH writes: the widget card's 64-byte record, or the blob the app gets as its first message at start.
@@ -10,12 +10,12 @@ public enum PushResult: Equatable, Sendable {
     case ok
     /// Written less than 60 s ago; nothing written, retry after `ms`.
     case later(ms: UInt32)
-    /// NoApp (7), BadRequest (1, also every stub before 7), Io (2); 0xFF for an empty reply.
+    /// NoApp (7), BadRequest (1, also every stub before 8), Io (2); 0xFF for an empty reply.
     case refused(UInt8)
 }
 
-/// From stub 7 on; older stubs answer BadRequest.
-public func canPush(stub: UInt32) -> Bool { stub >= 7 }
+/// From stub 8 on; older stubs answer BadRequest.
+public func canPush(stub: UInt32) -> Bool { stub >= 8 }
 
 /// title ≤ 23 bytes at 0, value ≤ 39 bytes at 24 (0A starts a second line), NUL-padded to 64.
 public func widgetRecord(title: String, value: String) -> Data {

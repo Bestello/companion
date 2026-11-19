@@ -117,11 +117,11 @@ actor KLock {
         }
     }
 
-    /// Writes a job's records to the app's widget card or start blob (PUSH, stub 7, cmf-watch-sdk docs/widget-push.md).
+    /// Writes a job's records to the app's widget card or start blob (PUSH, stub 8, cmf-watch-sdk docs/widget-push.md).
     private func deliver(_ package: String, _ job: RefreshJob, _ records: [Data], _ session: KSession, _ now: Date) async {
         let line = "\(package) job \(job.id)"
         guard let data = job.pushData(records) else { return DevLog.shared.log("\(line): nothing to push (\(records.count) records)") }
-        guard canPush(stub: stub) else { return DevLog.shared.log("\(line): stub \(stub) takes no PUSH (7+)") }
+        guard canPush(stub: stub) else { return DevLog.shared.log("\(line): stub \(stub) takes no PUSH (8+)") }
         guard let slot = apps.first(where: { $0.value == package })?.key else { return DevLog.shared.log("\(line): not on the watch") }
         do {
             switch try await KLock.shared.run({ try await push(session, slot: slot, kind: job.target, data: data) }) {

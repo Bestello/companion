@@ -160,12 +160,12 @@ class RpcService : Service() {
         var slots: Map<String, Int>? = null
     }
 
-    /** Writes a job's records to the app's widget card or start blob (PUSH, stub 7, cmf-watch-sdk docs/widget-push.md). */
+    /** Writes a job's records to the app's widget card or start blob (PUSH, stub 8, cmf-watch-sdk docs/widget-push.md). */
     private suspend fun deliverJob(s: KSession, pkg: String, job: RefreshJob, records: List<ByteArray>, t: PushTarget, now: Long) {
         val line = "$pkg job ${job.id}"
         val data = job.pushData(records) ?: return DevLog.log(this, "$line: nothing to push (${records.size} records)")
         val stub = t.stub ?: stubVersion(s).also { t.stub = it }
-        if (!canPush(stub)) return DevLog.log(this, "$line: stub $stub takes no PUSH (7+)")
+        if (!canPush(stub)) return DevLog.log(this, "$line: stub $stub takes no PUSH (8+)")
         val slots = t.slots ?: installed(s, appSlots(stub)).filterKeys { it != LOADER_SLOT }.entries
             .associate { it.value.name to it.key }.also { t.slots = it }
         val slot = slots[pkg] ?: return DevLog.log(this, "$line: not on the watch")
