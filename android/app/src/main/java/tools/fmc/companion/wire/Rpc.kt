@@ -27,6 +27,7 @@ object Method {
     const val STORAGE_PUT = 0x61
     const val STORAGE_DELETE = 0x62
     const val BATTERY = 0x70
+    const val NOTIFY = 0x51
 
     /** No cap: in `caps` always, after the others. */
     val FREE = listOf(STORAGE_GET, STORAGE_PUT, STORAGE_DELETE, BATTERY)
@@ -38,6 +39,15 @@ object Method {
 /** What the phone keeps between requests: the parts of a request not joined yet, and each package's store. */
 class RpcState(val storage: KeyValueStore) {
     val parts = RequestParts()
+    var now: () -> Long = System::currentTimeMillis
+    private val notified = mutableMapOf<String, Long>()
+
+    /** notify: at most one per 10 s per package; true takes that one. */
+    @Synchronized fun mayNotify(pkg: String): Boolean {
+        notified[pkg]?.let { if (now() - it < 10_000) return false }
+        notified[pkg] = now()
+        return true
+    }
 }
 
 object RpcStatus {
@@ -126,6 +136,20 @@ fun httpRecords(code: Int, body: ByteArray): List<ByteArray> {
     return listOf(buf { le16(code); le16(body.size) }) + chunks
 }
 
+/** A watch app's notification on the phone. `find`: "find my phone", as loud as the phone allows. */
+data class PhoneAlert(val title: String, val body: String, val sound: Boolean, val find: Boolean)
+
+/** `flags:u8 ‖ title_len:u8 ‖ title ‖ body`, flags bit 0 sound, bit 1 find my phone; title ≤ 64 bytes, both UTF-8. */
+fun parseAlert(d: ByteArray): PhoneAlert? {
+    if (d.size < 2 || d.u8(1) > 64 || d.size < 2 + d.u8(1)) return null
+    fun utf8(b: ByteArray) = runCatching {
+        Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(b)).toString()
+    }.getOrNull()
+    val title = utf8(d.copyOfRange(2, 2 + d.u8(1))) ?: return null
+    val body = utf8(d.copyOfRange(2 + d.u8(1), d.size)) ?: return null
+    return PhoneAlert(title, body, d.u8(0) and 1 != 0, d.u8(0) and 2 != 0)
+}
+
 /** `level:u8 ‖ flags:u8`, level 0..100, flags bit 0 plugged in. */
 fun batteryRecord(level: Int, charging: Boolean): ByteArray = bytes(level.coerceIn(0, 100), if (charging) 1 else 0)
 
@@ -211,6 +235,7 @@ fun capOf(method: Int, args: ByteArray): String? = when (method) {
     Method.HTTP_REQUEST -> parseHttpCall(args)?.let { "http:${it.host}" }
     Method.NOTIFICATIONS -> "notifications".takeIf { args.size == 1 }
     Method.BATTERY -> "" // no cap
+    Method.NOTIFY -> parseAlert(args)?.let { "notify" }
     else -> null
 }
 
@@ -240,7 +265,7 @@ suspend fun answer(pkg: String, msg: ByteArray, phone: Phone, budgetMs: Long = 7
     fun ok(cap: String) = grants[cap] == true && phone.osAllows(cap)
     if (method == Method.CAPS) {
         val fixed = listOf(Method.CALENDAR to "calendar", Method.LOCATION to "location", Method.WEATHER to "weather",
-            Method.NOTIFICATIONS to "notifications").filter { ok(it.second) }.map { it.first }
+            Method.NOTIFICATIONS to "notifications", Method.NOTIFY to "notify").filter { ok(it.second) }.map { it.first }
         val http = if (grants.any { it.key.startsWith("http:") && it.value }) listOf(Method.HTTP, Method.HTTP_REQUEST) else emptyList()
         return replies(r.id, RpcStatus.OK, listOf(((fixed + http).sorted() + Method.FREE).map { it.toByte() }.toByteArray()))
     }
@@ -262,6 +287,7 @@ suspend fun answer(pkg: String, msg: ByteArray, phone: Phone, budgetMs: Long = 7
         false -> return replies(r.id, RpcStatus.DENIED)
         true -> if (!phone.osAllows(cap)) return replies(r.id, RpcStatus.DENIED)
     }
+    if (method == Method.NOTIFY && !phone.state.mayNotify(pkg)) return replies(r.id, RpcStatus.UNAVAILABLE)
     // not a child of the caller: a service stuck in blocking I/O must not hold the reply past the budget
     val run = CoroutineScope(Dispatchers.IO).async { runCatching { phone.call(pkg, method, args) } }
     val result = withTimeoutOrNull(budgetMs) { run.await() }

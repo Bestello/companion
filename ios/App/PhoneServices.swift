@@ -1,6 +1,7 @@
 import CoreLocation
 import EventKit
 import UIKit
+import UserNotifications
 import WeatherKit
 import WireKit
 
@@ -51,6 +52,8 @@ import WireKit
         case "calendar": EKEventStore.authorizationStatus(for: .event) == .fullAccess
         case "location", "weather": [.authorizedWhenInUse, .authorizedAlways].contains(locations.authorizationStatus)
         case "notifications": false
+        // ponytail: the system drops a notification the user turned off; no sync read of that here
+        case "notify": true
         default: cap.hasPrefix("http:")
         }
     }
@@ -63,6 +66,8 @@ import WireKit
             events = EKEventStore() // a store made before the grant sees no calendars
         case "location", "weather":
             if locations.authorizationStatus == .notDetermined { locations.requestWhenInUseAuthorization() }
+        case "notify":
+            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
         default: break
         }
     }
@@ -147,6 +152,19 @@ import WireKit
     }
 
     func notifications(limit: Int) async throws -> [PhoneNotification] { throw RPCStatus.unavailable }
+
+    /// A local notification with the default sound, or none. "Find my phone" is the same with its sound on: critical
+    /// alerts need Apple's entitlement and iOS gives a background app no way to play its own audio.
+    func notify(_ package: String, _ alert: PhoneAlert) async throws {
+        let app = StoreApps.shared.listing(package)?.name ?? package
+        let n = UNMutableNotificationContent()
+        n.title = alert.find ? String(localized: "Find my phone") : alert.title.isEmpty ? app : alert.title
+        n.body = alert.find && alert.body.isEmpty ? String(localized: "\(app) on your watch is looking for this phone.") : alert.body
+        if alert.sound || alert.find { n.sound = .default }
+        n.userInfo = ["package": package]
+        try await UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: "notify-\(package)-\(UUID().uuidString)", content: n, trigger: nil))
+    }
 
     func battery() async throws -> (level: Int, charging: Bool) {
         let d = UIDevice.current

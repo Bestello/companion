@@ -688,6 +688,7 @@ struct AppView: View {
         case "location": String(localized: "Location")
         case "weather": String(localized: "Weather")
         case "notifications": String(localized: "Notifications")
+        case "notify": String(localized: "Send Notifications")
         default: cap.hasPrefix("http:") ? String(cap.dropFirst(5)) : cap
         }
     }
@@ -698,6 +699,7 @@ struct AppView: View {
         case "location": "location.fill"
         case "weather": "cloud.sun.fill"
         case "notifications": "bell.badge.fill"
+        case "notify": "app.badge.fill"
         default: "globe"
         }
     }
@@ -705,6 +707,7 @@ struct AppView: View {
     static func color(_ cap: String) -> Color {
         switch cap {
         case "calendar", "notifications": .red
+        case "notify": .orange
         case "location": .blue
         case "weather": .cyan
         default: .gray

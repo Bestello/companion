@@ -46,6 +46,7 @@ Capabilities:
 | `weather` | `weather` | the same as `location` (the phone needs it; the watch gets no position) |
 | `http:<host>` | `http.get` and `http.request` to that host | — |
 | `notifications` | `notifications` | Android: notification listener access. iOS: none possible, the method answers `UNAVAILABLE` |
+| `notify` | `notify` | iOS: notification authorization (a turned-off one drops it silently); Android: `POST_NOTIFICATIONS` |
 
 Flow:
 
@@ -123,6 +124,7 @@ Characters the watch has no glyph for stay as they are (they draw as `?`).
 | `0x40` | `http.get` | `http:<host>` |
 | `0x41` | `http.request` | `http:<host>` |
 | `0x50` | `notifications` | `notifications` |
+| `0x51` | `notify` | `notify` |
 | `0x60` | `storage.get` | — |
 | `0x61` | `storage.put` | — |
 | `0x62` | `storage.delete` | — |
@@ -243,6 +245,27 @@ vectors).
 Quota: 64 KiB per package, keys and values counted together; a put that would go over it is `TOO_LARGE` and keeps
 the old value. Kept in the app's own files, out of backups (iOS Application Support excluded from backup, Android
 `noBackupFilesDir`), one file per key. Delete from the Watch clears the package's store; Reset permissions doesn't.
+
+### `0x51 notify`
+
+The app posts a notification on the phone. Args (`notify` vectors):
+
+```
+flags:u8 ‖ title_len:u8 ‖ title ‖ body
+```
+
+`flags` bit 0 with sound, bit 1 "find my phone". `title` ≤ 64 bytes, `body` the rest of the message (so title and
+body ≤ 121 bytes together), both UTF-8; anything else is `BAD_REQUEST`. An empty title shows the app's name. `OK`, no
+records. At most one per 10 s per package; another one sooner is `UNAVAILABLE` (the app tries later).
+
+"Find my phone" is as loud as each phone lets an app be:
+
+- Android: a channel of its own on the alarm stream, high importance, repeating its sound until the user opens the
+  shade (`FLAG_INSISTENT`). Do Not Disturb still silences it unless the user lets the channel through.
+- iOS: a notification with the default sound, nothing more. Critical alerts need an entitlement Apple grants to
+  medical and safety apps, and a backgrounded app can't play its own audio.
+
+Tapping one opens the app's page in the companion.
 
 ### `0x70 phone.battery`
 

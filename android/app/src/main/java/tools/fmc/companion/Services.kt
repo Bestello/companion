@@ -30,6 +30,7 @@ import tools.fmc.companion.wire.HttpCall
 import tools.fmc.companion.wire.KeyValueStore
 import tools.fmc.companion.wire.RpcState
 import tools.fmc.companion.wire.httpHost
+import tools.fmc.companion.wire.parseAlert
 import tools.fmc.companion.wire.parseHttpCall
 import tools.fmc.companion.wire.requestHeaders
 import tools.fmc.companion.wire.Method
@@ -71,6 +72,7 @@ class PhoneServices(private val context: Context, private val grants: Grants) : 
             Method.HTTP -> http(pkg, HttpCall("GET", String(args), httpHost(args)!!))
             Method.HTTP_REQUEST -> http(pkg, parseHttpCall(args)!!)
             Method.NOTIFICATIONS -> NotificationWatcher.records(context, args.u8(0).coerceIn(1, 10), show)
+            Method.NOTIFY -> emptyList<ByteArray>().also { postAlert(context, pkg, parseAlert(args)!!) }
             Method.BATTERY -> context.getSystemService(android.os.BatteryManager::class.java).let { b ->
                 val level = b.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
                 if (level !in 0..100) throw RpcError(RpcStatus.UNAVAILABLE)

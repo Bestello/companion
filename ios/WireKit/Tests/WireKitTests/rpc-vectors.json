@@ -537,5 +537,66 @@
    },
    "hex": "6400"
   }
+ ],
+ "notify": [
+  {
+   "args": "010554696d65725061737461206973207265616479",
+   "alert": {
+    "title": "Timer",
+    "body": "Pasta is ready",
+    "sound": true,
+    "find": false
+   }
+  },
+  {
+   "args": "0008d09ad183d180d1815553442039322c34",
+   "alert": {
+    "title": "Курс",
+    "body": "USD 92,4",
+    "sound": false,
+    "find": false
+   }
+  },
+  {
+   "args": "0300",
+   "alert": {
+    "title": "",
+    "body": "",
+    "sound": true,
+    "find": true
+   }
+  },
+  {
+   "args": "00004f6e6c79206120626f6479",
+   "alert": {
+    "title": "",
+    "body": "Only a body",
+    "sound": false,
+    "find": false
+   }
+  },
+  {
+   "args": "",
+   "bad": true
+  },
+  {
+   "args": "01",
+   "bad": true
+  },
+  {
+   "args": "0105414243",
+   "bad": true,
+   "note": "title_len past the end"
+  },
+  {
+   "args": "01414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141",
+   "bad": true,
+   "note": "title over 64 bytes"
+  },
+  {
+   "args": "0100ff",
+   "bad": true,
+   "note": "body not UTF-8"
+  }
  ]
 }

@@ -138,6 +138,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     func userNotificationCenter(_ c: UNUserNotificationCenter,
                                 willPresent n: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner]
+        [.banner, .sound] // a watch app's notify with its sound, also while the companion is open
     }
 }

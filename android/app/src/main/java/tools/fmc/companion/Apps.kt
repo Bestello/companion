@@ -608,6 +608,7 @@ fun capTitle(cap: String) = when (cap) {
     "location" -> "Location"
     "weather" -> "Weather"
     "notifications" -> "Notifications"
+    "notify" -> "Send notifications"
     else -> cap.removePrefix("http:")
 }
 
@@ -617,6 +618,7 @@ private fun CapTile(cap: String) = when (cap) {
     "location" -> IconTile(Icons.Default.LocationOn, Color(0xFF1E88E5))
     "weather" -> IconTile(painterResource(R.drawable.ic_cloud), Color(0xFF00ACC1))
     "notifications" -> IconTile(Icons.Default.Notifications, Color(0xFFE53935))
+    "notify" -> IconTile(Icons.Default.Notifications, Color(0xFFFB8C00))
     else -> IconTile(painterResource(R.drawable.ic_public), Color(0xFF757575))
 }
 

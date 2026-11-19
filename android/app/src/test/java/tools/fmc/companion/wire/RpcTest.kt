@@ -246,4 +246,28 @@ class RpcTest {
         assertNull(s.get("p", "a"))
         assert(s.get("q", "b") != null)
     }
+
+    @Test fun notifyAlert() = runBlocking {
+        each("notify") { t ->
+            val got = parseAlert(hex(t.getString("args")))
+            if (t.optBoolean("bad")) assertNull(got, t.toString()) else {
+                val a = t.getJSONObject("alert")
+                assertEquals(PhoneAlert(a.getString("title"), a.getString("body"), a.getBoolean("sound"), a.getBoolean("find")), got)
+            }
+        }
+        val p = FakePhone()
+        var t = 0L
+        p.state.now = { t }
+        val m = "R1Q".toByteArray() + byteArrayOf(1, 0x51) + hex(v.getJSONArray("notify").getJSONObject(0).getString("args"))
+        assertEquals(RpcStatus.ASK, status(answer("a", m, p)))
+        assertEquals(listOf("a notify"), p.asked)
+        p.grants["notify"] = true
+        assertEquals(RpcStatus.OK, status(answer("a", m, p)))
+        t += 5_000
+        assertEquals(RpcStatus.UNAVAILABLE, status(answer("a", m, p)), "one per 10 s")
+        assertEquals(RpcStatus.OK, status(answer("b", m, p)), "per package")
+        t += 6_000
+        assertEquals(RpcStatus.OK, status(answer("a", m, p)))
+        assertEquals(RpcStatus.BAD_REQUEST, status(answer("a", "R1Q".toByteArray() + byteArrayOf(1, 0x51, 0, 9), p)))
+    }
 }

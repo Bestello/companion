@@ -57,6 +57,11 @@ struct RPCVectors: Decodable {
     let storage: Storage
     struct Battery: Decodable { struct In: Decodable { let level: Int; let charging: Bool }; let `in`: In; let hex: String }
     let battery: [Battery]
+    struct Notify: Decodable {
+        struct A: Decodable { let title: String; let body: String; let sound: Bool; let find: Bool }
+        let args: String; let alert: A?; let bad: Bool?
+    }
+    let notify: [Notify]
     let notifications: [Notif]
     let replies: [Reply]
 
@@ -228,6 +233,8 @@ private let rv = RPCVectors.shared
     }
     func notifications(limit: Int) async throws -> [PhoneNotification] { [] }
     func battery() async throws -> (level: Int, charging: Bool) { (57, true) }
+    var alerts: [PhoneAlert] = []
+    func notify(_ package: String, _ alert: PhoneAlert) async throws { alerts.append(alert) }
 }
 
 private func call(_ method: UInt8, _ args: [UInt8] = [], id: UInt8 = 1) -> Data {
@@ -365,4 +372,30 @@ let storageIDs = Data(RPCMethod.free)
     try s.put("q", "b", Data(count: 30_000)) // another package has its own quota
     s.clear("p")
     #expect(s.get("p", "a") == nil && s.get("q", "b") != nil)
+}
+
+@Test @MainActor func rpcNotify() async {
+    for n in rv.notify {
+        let got = parseAlert(hex(n.args))
+        if n.bad == true { #expect(got == nil, "\(n.args)") } else {
+            let a = n.alert!
+            #expect(got == PhoneAlert(title: a.title, body: a.body, sound: a.sound, find: a.find), "\(n.args)")
+        }
+    }
+    let h = FakeHost()
+    var t = Date(timeIntervalSince1970: 0)
+    h.state.now = { t }
+    let m = call(RPCMethod.notify, Array(hex(rv.notify[0].args)))
+    #expect(await ask(h, m)?.0 == .ask)
+    #expect(h.asked == ["weather.app notify"])
+    h.given["weather.app"] = ["notify": true]
+    #expect(await ask(h, m)?.0 == .ok)
+    #expect(h.alerts.count == 1 && h.alerts[0].title == "Timer")
+    t += 5
+    #expect(await ask(h, m)?.0 == .unavailable, "one per 10 s")
+    #expect(await ask(h, m, package: "other.app")?.0 == .ask, "per package")
+    t += 6
+    #expect(await ask(h, m)?.0 == .ok)
+    #expect(await ask(h, call(RPCMethod.notify, [0, 9]))?.0 == .badRequest)
+    #expect(await ask(h, call(RPCMethod.caps))?.1 == [Data([RPCMethod.notify]) + storageIDs])
 }

@@ -108,6 +108,7 @@ import WireKit
         case "location": String(localized: "your approximate location")
         case "weather": String(localized: "the weather where you are")
         case "notifications": String(localized: "your notifications")
+        case "notify": String(localized: "to send you notifications")
         default: cap.hasPrefix("http:") ? String(localized: "the web: \(String(cap.dropFirst(5)))") : cap
         }
     }

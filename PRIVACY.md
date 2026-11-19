@@ -12,6 +12,8 @@ It counts anonymous usage events (see below).
   on the phone.
 - **Permissions you grant to watch apps.** Your answers are stored only on the phone. Deleting an app from the watch
   with FMC Companion forgets them.
+- **Notifications from watch apps.** A watch app you allow can show a notification on the phone with its own text.
+  It's posted locally and not sent anywhere.
 - **Data watch apps keep on the phone.** A watch app can store up to 64 KiB of its own data on the phone. It stays
   in the app's files on the phone, isn't backed up, and goes when you delete the app from the watch with FMC
   Companion.

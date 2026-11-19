@@ -81,6 +81,7 @@ fun capLabel(cap: String) = when (cap) {
     "location" -> "your location"
     "weather" -> "the weather where you are"
     "notifications" -> "your notifications"
+    "notify" -> "to send you notifications"
     else -> "data from ${cap.removePrefix("http:")}"
 }
 
@@ -88,11 +89,13 @@ fun capLabel(cap: String) = when (cap) {
 fun osPermission(cap: String) = when (cap) {
     "calendar" -> Manifest.permission.READ_CALENDAR
     "location", "weather" -> Manifest.permission.ACCESS_COARSE_LOCATION
+    "notify" -> Manifest.permission.POST_NOTIFICATIONS
     else -> null
 }
 
 fun osAllows(context: Context, cap: String): Boolean = when {
     cap == "notifications" -> context.packageName in NotificationManagerCompat.getEnabledListenerPackages(context)
+    cap == "notify" -> NotificationManagerCompat.from(context).areNotificationsEnabled()
     else -> osPermission(cap)?.let { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED } ?: true
 }
 
@@ -144,4 +147,36 @@ object Cookies {
             return list.filter { it.matches(url) }
         }
     }
+}
+
+/**
+ * A watch app's notify (0x51): its own title and text, opening the app's page. Channels fix the sound, so three:
+ * with the default sound, quiet, and "find my phone" on the alarm stream, repeating until it is seen
+ * (FLAG_INSISTENT). DND still wins unless the user lets the channel through.
+ */
+fun postAlert(context: Context, pkg: String, a: tools.fmc.companion.wire.PhoneAlert) {
+    val nm = context.getSystemService(NotificationManager::class.java)
+    val id = when {
+        a.find -> "find-phone".also {
+            nm.createNotificationChannel(NotificationChannel(it, "Find my phone", NotificationManager.IMPORTANCE_HIGH).apply {
+                setSound(android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM),
+                    android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+                enableVibration(true)
+            })
+        }
+        a.sound -> "watch-apps".also { channel(context, it, "From watch apps", NotificationManager.IMPORTANCE_DEFAULT) }
+        else -> "watch-apps-quiet".also { channel(context, it, "From watch apps, silent", NotificationManager.IMPORTANCE_LOW) }
+    }
+    val app = StoreApps.listing(pkg)?.name ?: pkg
+    val n = NotificationCompat.Builder(context, id)
+        .setSmallIcon(R.drawable.ic_watch)
+        .setContentTitle(if (a.find) "Find my phone" else a.title.ifEmpty { app })
+        .setContentText(if (a.find && a.body.isEmpty()) "$app on your watch is looking for this phone." else a.body)
+        .setContentIntent(appsIntent(context, pkg))
+        .setAutoCancel(true)
+        .apply { if (a.find) setCategory(NotificationCompat.CATEGORY_ALARM).setPriority(NotificationCompat.PRIORITY_MAX) }
+        .build()
+    if (a.find) n.flags = n.flags or android.app.Notification.FLAG_INSISTENT
+    nm.notify("notify|$pkg|${System.nanoTime()}".hashCode(), n)
 }
