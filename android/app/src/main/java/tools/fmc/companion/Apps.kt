@@ -1,5 +1,7 @@
 package tools.fmc.companion
 
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
 import android.content.Context
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.material3.IconButton
@@ -87,17 +89,14 @@ import androidx.compose.material3.Badge as CountPill
 // The apps on the watch and what each may use on the phone (docs/miniapp-rpc.md, "Permissions"): a list of apps,
 // and per app "Allow <app> to access" with a switch per permission.
 
-private const val NEARBY = "Anyone nearby with a Bluetooth scanner could read " +
-    "what goes to the watch, location included (rounded to about 10 km)."
-
 /** An app on the watch, or one that has answers on the phone but is not on the watch now. */
 class WatchApp(val name: String, val header: PackageHeader? = null, val slot: Int? = null) {
     /** The store's name for it, else the package name. */
     val title get() = StoreApps.listing(name)?.name ?: name
     val detail get() = when {
-        header == null || slot == null -> "Not on the watch"
-        update != null -> "Version ${versionText(header.version)} → ${versionText(update!!.version)} · slot $slot"
-        else -> "Version ${versionText(header.version)} · slot $slot"
+        header == null || slot == null -> str(R.string.not_on_watch)
+        update != null -> str(R.string.app_version_update, versionText(header.version), versionText(update!!.version), slot)
+        else -> str(R.string.app_version, versionText(header.version), slot)
     }
     /** The store's build when it's newer than the one on the watch. */
     val update get() = header?.let { h -> StoreApps.latest(name)?.takeIf { it.version > h.version } }
@@ -282,7 +281,7 @@ object AppOrder {
         try {
             if (FirmwareModel.check?.loaderPackage == null) FirmwareModel.refresh(model.account.token)
             val loader = FirmwareModel.check?.loaderPackage
-                ?: return run { status = "Couldn't load the App Loader from fmc.tools to send the order. Pull to refresh to try again." }
+                ?: return run { status = str(R.string.order_loader_missing) }
             kInstall(context, model, setOrder(loader, names.take(16))) {}
             DevLog.log(context, "app order sent: ${names.joinToString()}")
             unsent = false
@@ -292,11 +291,11 @@ object AppOrder {
             throw e
         } catch (_: tools.fmc.companion.wire.InstallError.Busy) {
             // the menu holds the loader while it is open; tried again on the next read of the watch
-            status = "The Apps menu or an app is open on the watch. The order goes when you're back on the watch face and refresh."
+            status = str(R.string.order_busy)
         } catch (_: tools.fmc.companion.wire.OrderError) {
-            status = "The App Loader on fmc.tools is older than the app order. The order stays on this phone for now."
+            status = str(R.string.order_old_loader)
         } catch (e: Exception) {
-            status = "Couldn't send the order: ${e.message}"
+            status = str(R.string.order_send_failed, e.message.toString())
         } finally {
             sending = false
         }
@@ -326,16 +325,16 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit) {
     val loading = apps.isEmpty() && if (showAll) !StoreApps.loaded else model.isChecking
     val on = AppOrder.sorted(apps.filter { it.slot != null }, order)
     Column {
-        Bar("Apps") {
+        Bar(stringResource(R.string.apps)) {
             if (!showAll && on.isNotEmpty()) TextButton({
                 if (editing) scope.launch { AppOrder.send(context, model) }
                 editing = !editing
-            }) { Text(if (editing) "Done" else "Edit") }
+            }) { Text(if (editing) stringResource(R.string.done) else stringResource(R.string.edit)) }
         }
         LazyColumn {
             item {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    listOf("Installed", "All").forEachIndexed { i, label ->
+                    listOf(stringResource(R.string.installed), stringResource(R.string.shelf_all)).forEachIndexed { i, label ->
                         SegmentedButton(showAll == (i == 1), { showAll = i == 1; editing = false },
                             SegmentedButtonDefaults.itemShape(i, 2)) { Text(label) }
                     }
@@ -347,17 +346,17 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit) {
                         if (i > 0) HorizontalDivider()
                         NavRow(app.title, app.detail, grants.pendingCount(app.name), { open(if (showAll) "store:${app.name}" else app.name) },
                             trailing = if (app.update != null || (app.slot == null && StoreApps.listing(app.name)?.pkg != null)) {{ GetButton(model, app) }}
-                                else if (showAll && app.slot != null) {{ Text("Installed", color = Fmc.secondary, fontWeight = FontWeight.SemiBold,
+                                else if (showAll && app.slot != null) {{ Text(stringResource(R.string.installed), color = Fmc.secondary, fontWeight = FontWeight.SemiBold,
                                     style = MaterialTheme.typography.bodySmall) }} else null) { AppIcon(app.name) }
                     }
                 }
             }
             val (updates, current) = on.partition { it.update != null }
-            if (showAll) { if (apps.isNotEmpty()) group("FMC store", apps, if (model.listedLoader == null) "Connect on the Watch tab to install apps." else null) }
+            if (showAll) { if (apps.isNotEmpty()) group(str(R.string.fmc_store), apps, if (model.listedLoader == null) str(R.string.connect_to_install_apps) else null) }
             else {
                 // one list while editing: the order is of every app on the watch
                 if (editing) item("order") {
-                    Section("On the watch", "Set the order of the Apps menu on the watch. It goes to the watch inside the App Loader (about 54 KB) when you tap Done.") {
+                    Section(stringResource(R.string.on_the_watch), stringResource(R.string.order_footer)) {
                         on.forEachIndexed { i, app ->
                             if (i > 0) HorizontalDivider()
                             fun move(to: Int) {
@@ -369,17 +368,17 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit) {
                                 AppIcon(app.name)
                                 Text(app.title, Modifier.weight(1f))
                                 IconButton({ move(i - 1) }, enabled = i > 0) {
-                                    Icon(Icons.Default.KeyboardArrowUp, "Move ${app.title} up")
+                                    Icon(Icons.Default.KeyboardArrowUp, stringResource(R.string.move_up, app.title))
                                 }
                                 IconButton({ move(i + 1) }, enabled = i < on.size - 1) {
-                                    Icon(Icons.Default.KeyboardArrowDown, "Move ${app.title} down")
+                                    Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.move_down, app.title))
                                 }
                             }
                         }
                     }
-                } else if (updates.isNotEmpty()) group("Updates", updates, "Updates install over Bluetooth. Keep the app closed on the watch meanwhile.")
-                if (!editing && current.isNotEmpty()) group("On the watch", current,
-                    if (AppOrder.sending) "Sending the order to the watch…" else AppOrder.status)
+                } else if (updates.isNotEmpty()) group(str(R.string.updates), updates, str(R.string.updates_footer))
+                if (!editing && current.isNotEmpty()) group(str(R.string.on_the_watch), current,
+                    if (AppOrder.sending) str(R.string.sending_order) else AppOrder.status)
             }
             if (loading) item {
                 Section {
@@ -399,8 +398,8 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit) {
             } else if (apps.isEmpty()) item {
                 Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("No apps", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text(if (showAll) "Couldn't load the FMC store." else "Connect on the Watch tab to see the apps on the watch.",
+                    Text(stringResource(R.string.no_apps), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(if (showAll) stringResource(R.string.store_load_failed) else stringResource(R.string.connect_to_see_apps),
                         color = Fmc.secondary, textAlign = TextAlign.Center)
                 }
             }
@@ -444,7 +443,7 @@ fun AppScreen(model: AppModel, value: String, open: (String) -> Unit, back: () -
         Bar(app.title, back) {
             listing?.takeIf { store }?.let { l ->
                 IconButton({ context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(l.page))) }) {
-                    Icon(painterResource(R.drawable.ic_open_in_new), "Open on fmc.tools")
+                    Icon(painterResource(R.drawable.ic_open_in_new), stringResource(R.string.open_on_fmc))
                 }
             }
         }
@@ -460,7 +459,7 @@ fun AppScreen(model: AppModel, value: String, open: (String) -> Unit, back: () -
                             style = MaterialTheme.typography.bodyMedium, maxLines = 3)
                         androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
                         if (listing != null || app.slot != null) GetButton(model, app, large = true)
-                        if (listing?.pkg != null && model.listedLoader == null) Text("Connect on the Watch tab to install.",
+                        if (listing?.pkg != null && model.listedLoader == null) Text(stringResource(R.string.connect_to_install),
                             style = MaterialTheme.typography.bodySmall, color = Fmc.secondary)
                     }
                 }
@@ -478,15 +477,15 @@ fun AppScreen(model: AppModel, value: String, open: (String) -> Unit, back: () -
                     }
                 }
                 if (listing.description.isNotEmpty()) item {
-                    Section("Description") { SelectionContainer { com.mikepenz.markdown.m3.Markdown(listing.description) } }
+                    Section(stringResource(R.string.description)) { SelectionContainer { com.mikepenz.markdown.m3.Markdown(listing.description) } }
                 }
                 item {
-                    Section("Information") {
+                    Section(stringResource(R.string.information)) {
                         val rows = buildList {
-                            if (listing.author.isNotEmpty()) add("Developer" to listing.author)
-                            if (listing.version.isNotEmpty()) add("Version" to listing.version)
-                            app.header?.let { h -> add("On the watch" to "${versionText(h.version)} · slot ${app.slot}") }
-                            if (listing.abi.isNotEmpty()) add("Loader ABI" to listing.abi)
+                            if (listing.author.isNotEmpty()) add(stringResource(R.string.app_developer) to listing.author)
+                            if (listing.version.isNotEmpty()) add(stringResource(R.string.version) to listing.version)
+                            app.header?.let { h -> add(stringResource(R.string.on_the_watch) to stringResource(R.string.slot_value, versionText(h.version), app.slot ?: 0)) }
+                            if (listing.abi.isNotEmpty()) add(stringResource(R.string.loader_abi) to listing.abi)
                         }
                         rows.forEachIndexed { i, (k, v) ->
                             if (i > 0) HorizontalDivider()
@@ -497,7 +496,7 @@ fun AppScreen(model: AppModel, value: String, open: (String) -> Unit, back: () -
                             Row(Modifier.fillMaxWidth().clickable {
                                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(listing.source)))
                             }, verticalAlignment = Alignment.CenterVertically) {
-                                Text("Source code", Modifier.weight(1f))
+                                Text(stringResource(R.string.source_code), Modifier.weight(1f))
                                 Icon(painterResource(R.drawable.ic_open_in_new), null, tint = Fmc.secondary)
                             }
                         }
@@ -516,20 +515,20 @@ fun AppScreen(model: AppModel, value: String, open: (String) -> Unit, back: () -
                 Section {
                     app.update?.let { new ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Version ${versionText(new.version)} is out", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.version_out, versionText(new.version)), Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
                             GetButton(model, app)
                         }
                         if (listing != null) HorizontalDivider()
                     }
-                    if (listing != null) Text("View in the Store", Modifier.fillMaxWidth().clickable { open("store:$name") })
+                    if (listing != null) Text(stringResource(R.string.view_in_store), Modifier.fillMaxWidth().clickable { open("store:$name") })
                 }
             }
             app.slot?.let { slot ->
                 item {
                     var confirm by remember { mutableStateOf(false) }
                     val scope = rememberCoroutineScope()
-                    Section(footer = "Removes ${app.title} and its data from the watch, and forgets its permissions.") {
-                        Text("Delete from the Watch", Modifier.fillMaxWidth().clickable(enabled = name !in AppUpdates.progress) { confirm = true },
+                    Section(footer = stringResource(R.string.delete_app_footer, app.title)) {
+                        Text(stringResource(R.string.delete_from_watch), Modifier.fillMaxWidth().clickable(enabled = name !in AppUpdates.progress) { confirm = true },
                             color = Fmc.danger)
                     }
                     if (confirm) DeleteDialog(app, { confirm = false }) { scope.launch { AppUpdates.remove(context, model, name, slot) } }
@@ -538,8 +537,8 @@ fun AppScreen(model: AppModel, value: String, open: (String) -> Unit, back: () -
             item {
                 // background jobs: the app's own refreshes, each with a switch
                 var jobs by remember { mutableStateOf(Jobs(context).of(name)) }
-                if (jobs.isNotEmpty()) Section("Background refresh",
-                    footer = "${app.title} asked the phone to fetch these on its own, for its widget or page on the watch. They run while the phone is connected to the watch.") {
+                if (jobs.isNotEmpty()) Section(stringResource(R.string.background_refresh),
+                    footer = stringResource(R.string.background_refresh_footer, app.title)) {
                     jobs.forEachIndexed { i, j ->
                         if (i > 0) HorizontalDivider()
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -550,11 +549,11 @@ fun AppScreen(model: AppModel, value: String, open: (String) -> Unit, back: () -
                 }
             }
             if (caps.isEmpty()) item {
-                Section { Text("${app.title} hasn't asked for anything on your phone.", color = Fmc.secondary) }
+                Section { Text(stringResource(R.string.asked_nothing, app.title), color = Fmc.secondary) }
             } else {
                 item {
-                    Section("Allow ${app.title} to access",
-                        footer = (if (offInOs.isEmpty()) "" else "Some of these are off for FMC Companion in Android settings.\n\n") + NEARBY) {
+                    Section(stringResource(R.string.allow_access, app.title),
+                        footer = (if (offInOs.isEmpty()) "" else stringResource(R.string.some_off_in_settings) + "\n\n") + stringResource(R.string.nearby_warning)) {
                         caps.forEachIndexed { i, cap ->
                             if (i > 0) HorizontalDivider()
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -562,9 +561,9 @@ fun AppScreen(model: AppModel, value: String, open: (String) -> Unit, back: () -
                                 Column(Modifier.weight(1f)) {
                                     Text(capTitle(cap))
                                     when {
-                                        grants.isPending(name, cap) -> Text("Waiting for your answer",
+                                        grants.isPending(name, cap) -> Text(stringResource(R.string.waiting_answer),
                                             style = MaterialTheme.typography.bodyMedium, color = Fmc.warning)
-                                        cap in offInOs -> Text("Off in system settings. Tap to turn on.",
+                                        cap in offInOs -> Text(stringResource(R.string.off_in_settings),
                                             Modifier.clickable { askOs(cap) }, style = MaterialTheme.typography.bodyMedium,
                                             color = Fmc.warning)
                                     }
@@ -579,8 +578,8 @@ fun AppScreen(model: AppModel, value: String, open: (String) -> Unit, back: () -
                                 val n = grants.headers(name, host).size
                                 Row(Modifier.fillMaxWidth().padding(start = 50.dp).clickable { open("headers:$name|$host") },
                                     verticalAlignment = Alignment.CenterVertically) {
-                                    Text("Headers", Modifier.weight(1f))
-                                    Text(if (n == 0) "None" else "$n", color = Fmc.secondary)
+                                    Text(stringResource(R.string.headers), Modifier.weight(1f))
+                                    Text(if (n == 0) stringResource(R.string.none) else "$n", color = Fmc.secondary)
                                     Text("  ›", color = Fmc.secondary)
                                 }
                             }
@@ -589,20 +588,20 @@ fun AppScreen(model: AppModel, value: String, open: (String) -> Unit, back: () -
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                             IconTile(Icons.Default.Email, Color(0xFF757575))
                             Column(Modifier.weight(1f)) {
-                                Text("Show text on the watch")
-                                Text("Calendar titles and notification text", style = MaterialTheme.typography.bodyMedium, color = Fmc.secondary)
+                                Text(stringResource(R.string.show_text))
+                                Text(stringResource(R.string.show_text_detail), style = MaterialTheme.typography.bodyMedium, color = Fmc.secondary)
                             }
                             Switch(grants.showText(name), { grants.setShowText(name, it) })
                         }
                         if (offInOs.isNotEmpty()) {
                             HorizontalDivider()
-                            Text("Open app settings", Modifier.fillMaxWidth().clickable { openSettings() })
+                            Text(stringResource(R.string.open_app_settings), Modifier.fillMaxWidth().clickable { openSettings() })
                         }
                     }
                 }
                 item {
-                    Section(footer = "${app.title} asks again the next time it needs something.") {
-                        Text("Reset permissions", Modifier.fillMaxWidth().clickable { resetting = true }, color = Fmc.danger)
+                    Section(footer = stringResource(R.string.asks_again, app.title)) {
+                        Text(stringResource(R.string.reset_permissions), Modifier.fillMaxWidth().clickable { resetting = true }, color = Fmc.danger)
                     }
                 }
             }
@@ -611,20 +610,20 @@ fun AppScreen(model: AppModel, value: String, open: (String) -> Unit, back: () -
     }
     if (resetting) AlertDialog(
         onDismissRequest = { resetting = false },
-        title = { Text("Reset permissions for $name?") },
-        text = { Text("${app.title} asks again the next time it needs something.") },
-        confirmButton = { TextButton({ resetting = false; grants.reset(name) }) { Text("Reset", color = Fmc.danger) } },
-        dismissButton = { TextButton({ resetting = false }) { Text("Cancel") } },
+        title = { Text(stringResource(R.string.reset_permissions_title, name)) },
+        text = { Text(stringResource(R.string.asks_again, app.title)) },
+        confirmButton = { TextButton({ resetting = false; grants.reset(name) }) { Text(stringResource(R.string.reset), color = Fmc.danger) } },
+        dismissButton = { TextButton({ resetting = false }) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
 fun capTitle(cap: String) = when (cap) {
-    "calendar" -> "Calendar"
-    "location" -> "Location"
-    "weather" -> "Weather"
-    "notifications" -> "Notifications"
-    "notify" -> "Send notifications"
-    "media" -> "Media"
+    "calendar" -> str(R.string.cap_calendar)
+    "location" -> str(R.string.cap_location)
+    "weather" -> str(R.string.cap_weather)
+    "notifications" -> str(R.string.cap_notifications)
+    "notify" -> str(R.string.cap_notify)
+    "media" -> str(R.string.cap_media)
     else -> cap.removePrefix("http:")
 }
 
@@ -658,11 +657,11 @@ object AppUpdates {
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (_: tools.fmc.companion.wire.InstallError.Busy) {
-            error = "${listing.name} or the Apps menu is open on the watch. Go back to the watch face, then try again."
+            error = str(R.string.app_busy, listing.name)
         } catch (e: tools.fmc.companion.wire.InstallError.NoFreeSlot) {
-            error = "All ${e.slots} app slots on the watch are taken."
+            error = appContext.resources.getQuantityString(R.plurals.no_free_slot, e.slots, e.slots)
         } catch (e: Exception) {
-            error = "Couldn't install ${listing.name}: ${e.message}"
+            error = str(R.string.app_install_failed, listing.name, e.message.toString())
         } finally {
             progress.remove(name)
         }
@@ -684,9 +683,9 @@ object AppUpdates {
             throw e
         } catch (_: tools.fmc.companion.wire.InstallError.Busy) {
             // the stub answers BUSY to removing a page's app even behind the face (cmf-watch-sdk docs/app-guide.md)
-            error = "$title is running on the watch. If it is a page next to the watch face, remove the page first: on the watch, long press $title in Apps → Remove page. Else go back to the watch face. Then try again."
+            error = str(R.string.app_running, title)
         } catch (e: Exception) {
-            error = "Couldn't delete $title: ${e.message}"
+            error = str(R.string.app_delete_failed, title, e.message.toString())
         } finally {
             progress.remove(name)
         }
@@ -695,9 +694,9 @@ object AppUpdates {
 
 @Composable
 fun DeleteDialog(app: WatchApp, dismiss: () -> Unit, delete: () -> Unit) = AlertDialog(onDismissRequest = dismiss,
-    title = { Text("Delete ${app.title} from the watch?") }, text = { Text("Its data on the watch goes too.") },
-    confirmButton = { TextButton({ dismiss(); delete() }) { Text("Delete", color = Fmc.danger) } },
-    dismissButton = { TextButton(dismiss) { Text("Cancel") } })
+    title = { Text(stringResource(R.string.delete_app_title, app.title)) }, text = { Text(stringResource(R.string.delete_app_text)) },
+    confirmButton = { TextButton({ dismiss(); delete() }) { Text(stringResource(R.string.delete), color = Fmc.danger) } },
+    dismissButton = { TextButton(dismiss) { Text(stringResource(R.string.cancel)) } })
 
 /** The App Store's button: Get, Update or Installed, and the progress while it installs; failures show as a dialog. */
 @Composable
@@ -709,17 +708,17 @@ fun GetButton(model: AppModel, app: WatchApp, large: Boolean = false) {
     when {
         p != null -> LinearProgressIndicator({ p.toFloat() }, Modifier.width(width))
         app.slot != null && app.update == null ->
-            Text("Installed", Modifier.width(width), color = Fmc.secondary, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+            Text(stringResource(R.string.installed), Modifier.width(width), color = Fmc.secondary, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
         else -> androidx.compose.material3.Button({ scope.launch { AppUpdates.update(context, model, app.name) } },
             Modifier.widthIn(min = width).height(if (large) 36.dp else 30.dp),
             enabled = model.loader != null && StoreApps.listing(app.name)?.pkg != null,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp)) {
-            Text(if (app.slot == null) "Get" else "Update", fontWeight = FontWeight.Bold)
+            Text(if (app.slot == null) stringResource(R.string.get) else stringResource(R.string.update), fontWeight = FontWeight.Bold)
         }
     }
     AppUpdates.error?.let {
-        AlertDialog(onDismissRequest = { AppUpdates.error = null }, title = { Text("Couldn't install") },
-            text = { Text(it) }, confirmButton = { TextButton({ AppUpdates.error = null }) { Text("OK") } })
+        AlertDialog(onDismissRequest = { AppUpdates.error = null }, title = { Text(stringResource(R.string.install_failed)) },
+            text = { Text(it) }, confirmButton = { TextButton({ AppUpdates.error = null }) { Text(stringResource(R.string.ok)) } })
     }
 }
 
@@ -737,10 +736,10 @@ private fun ColumnScope.InfoStrip(app: WatchApp, listing: StoreApps.Listing) {
     Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 8.dp, vertical = 10.dp),
         verticalAlignment = Alignment.Top) {
         val cells = buildList<@Composable () -> Unit> {
-            add { cell("DOWNLOADS", compact(listing.downloads)) }
-            if (listing.version.isNotEmpty()) add { cell("VERSION", listing.version) }
-            if (listing.author.isNotEmpty()) add { cell("DEVELOPER", "👤", listing.author) }
-            app.slot?.let { add { cell("SLOT", "$it", "on the watch") } }
+            add { cell(stringResource(R.string.info_downloads), compact(listing.downloads)) }
+            if (listing.version.isNotEmpty()) add { cell(stringResource(R.string.info_version), listing.version) }
+            if (listing.author.isNotEmpty()) add { cell(stringResource(R.string.info_developer), "👤", listing.author) }
+            app.slot?.let { add { cell(stringResource(R.string.info_slot), "$it", stringResource(R.string.info_on_watch)) } }
             if (listing.abi.isNotEmpty()) add { cell("ABI", listing.abi) }
         }
         cells.forEachIndexed { i, c ->
@@ -760,24 +759,24 @@ fun HeadersScreen(pkg: String, host: String, back: () -> Unit) {
     val rows = remember { androidx.compose.runtime.mutableStateListOf(*grants.headers(pkg, host).toTypedArray()) }
     fun save() = grants.setHeaders(pkg, host, rows.filter { it.first.isNotBlank() })
     Column {
-        Bar("Headers", back)
+        Bar(stringResource(R.string.headers), back)
         LazyColumn {
             item {
-                Section(host, footer = "Sent with every request $pkg makes to $host. They stay on this phone, encrypted, and never go to the watch.") {
+                Section(host, footer = stringResource(R.string.headers_footer, pkg, host)) {
                     rows.forEachIndexed { i, (k, v) ->
                         if (i > 0) HorizontalDivider()
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 androidx.compose.material3.OutlinedTextField(k, { rows[i] = it to v; save() }, Modifier.fillMaxWidth(),
-                                    label = { Text("Name") }, singleLine = true)
+                                    label = { Text(stringResource(R.string.header_name)) }, singleLine = true)
                                 androidx.compose.material3.OutlinedTextField(v, { rows[i] = k to it; save() }, Modifier.fillMaxWidth(),
-                                    label = { Text("Value") }, singleLine = true)
+                                    label = { Text(stringResource(R.string.header_value)) }, singleLine = true)
                             }
-                            TextButton({ rows.removeAt(i); save() }) { Text("Delete", color = Fmc.danger) }
+                            TextButton({ rows.removeAt(i); save() }) { Text(stringResource(R.string.delete), color = Fmc.danger) }
                         }
                     }
                     if (rows.isNotEmpty()) HorizontalDivider()
-                    Text("Add header", Modifier.fillMaxWidth().clickable { rows.add("" to "") }, color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(R.string.add_header), Modifier.fillMaxWidth().clickable { rows.add("" to "") }, color = MaterialTheme.colorScheme.primary)
                 }
             }
         }

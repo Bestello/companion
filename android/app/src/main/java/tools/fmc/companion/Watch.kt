@@ -57,16 +57,15 @@ class FaceInstallError(message: String) : Exception(message)
 
 fun refusalText(why: FaceRefusal) = when (why) {
     FaceRefusal.AodWithoutPreview ->
-        "The always-on screen of this face has no thumbnail. Faces like this made the screen flash on a watch. " +
-            "Open it in the editor on fmc.tools and install it from there."
+        str(R.string.refusal_aod)
     is FaceRefusal.ImageTooBig ->
-        "An image of this face is ${why.w}×${why.h} px. Over $MAX_IMAGE_SIDE px can make the watch restart in a loop."
-    else -> "This file is not a watch face."
+        str(R.string.refusal_image_too_big, why.w, why.h, MAX_IMAGE_SIDE)
+    else -> str(R.string.refusal_not_face)
 }
 
 /** The file and the gate's verdict: nothing goes to the watch before the user has seen it. */
 suspend fun fetchFace(face: Watchface): Pair<ByteArray, FaceVerdict> {
-    val url = face.binURL ?: throw FaceInstallError("This watch face has no file.")
+    val url = face.binURL ?: throw FaceInstallError(str(R.string.face_no_file))
     val bin = download(url)
     val verdict = checkFace(bin)
     if (verdict is FaceVerdict.Refuse) throw FaceInstallError(refusalText(verdict.why))
@@ -84,7 +83,7 @@ suspend fun fetchFace(face: Watchface): Pair<ByteArray, FaceVerdict> {
  * fmc.tools' stock-dials.json, Nothing X gallery ones have nothing to go on.
  */
 data class DialSlot(val id: Long, val index: Int, val name: String?, val preview: String? = null) {
-    val label get() = name ?: "Face ${index + 1}"
+    val label get() = name ?: str(R.string.face_slot, index + 1)
 }
 
 /** fmc_frontend modules/device/lib/stock-dials.json (assets): id → name of the factory and Nothing gallery faces. */
@@ -268,7 +267,7 @@ suspend fun installFaceOnWatch(
             installFace(session, bin, seed, installed, cap, slot, progress = progress)
         }
     } catch (_: UploadError.NoFreeSlot) {
-        throw FaceInstallError("The watch is full. Delete a face on the watch (long press the face, swipe one up) and try again.")
+        throw FaceInstallError(str(R.string.watch_full_error))
     }
     val now = d.mine.filter { it != slot } + if (id in d.mine) emptyList() else listOf(id)
     prefs.edit().putString("dials-$watch", now.joinToString(",")).putString("name-$id", name).apply()

@@ -90,13 +90,13 @@ class Account(private val store: SecureStore) {
                                 val code = data.optString("code")
                                 if (code.isEmpty()) {
                                     throw ServerError(0, data.optString("error").ifEmpty { null }
-                                        ?.let { "${provider.displayName}: $it" } ?: "Sign-in failed")
+                                        ?.let { "${provider.displayName}: $it" } ?: str(R.string.sign_in_failed))
                                 }
                                 return@useLines code
                             }
                         }
                     }
-                    throw ServerError(0, "Sign-in was interrupted")
+                    throw ServerError(0, str(R.string.sign_in_interrupted))
                 }
             }
             auth("auth-with-oauth2", JSONObject().put("provider", provider.name).put("code", code)

@@ -79,14 +79,16 @@ class Grants(context: Context) {
     fun setShowText(pkg: String, on: Boolean) = prefs.edit().putBoolean("show|$pkg", on).apply()
 }
 
-fun capLabel(cap: String) = when (cap) {
-    "calendar" -> "your calendar"
-    "location" -> "your location"
-    "weather" -> "the weather where you are"
-    "notifications" -> "your notifications"
-    "notify" -> "to send you notifications"
-    "media" -> "what plays on your phone, and to control it"
-    else -> "data from ${cap.removePrefix("http:")}"
+/** The ask notification's title: "‹package› wants ‹cap›". */
+fun askTitle(context: Context, pkg: String, cap: String, write: Boolean) = when {
+    write -> context.getString(R.string.ask_http_write, pkg, cap.removePrefix("http:"))
+    cap == "calendar" -> context.getString(R.string.ask_calendar, pkg)
+    cap == "location" -> context.getString(R.string.ask_location, pkg)
+    cap == "weather" -> context.getString(R.string.ask_weather, pkg)
+    cap == "notifications" -> context.getString(R.string.ask_notifications, pkg)
+    cap == "notify" -> context.getString(R.string.ask_notify, pkg)
+    cap == "media" -> context.getString(R.string.ask_media, pkg)
+    else -> context.getString(R.string.ask_http, pkg, cap.removePrefix("http:"))
 }
 
 /** The Android permission a cap needs; notifications and http have none to ask with a dialog. */
@@ -118,11 +120,11 @@ fun appsIntent(context: Context, pkg: String? = null): PendingIntent = PendingIn
  *  http.request, "wants to read and change data on ‹host›". */
 fun notifyAsk(context: Context, pkg: String, cap: String, write: Boolean = false) {
     if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
-    channel(context, "ask", "Watch app requests", NotificationManager.IMPORTANCE_DEFAULT)
+    channel(context, "ask", context.getString(R.string.channel_ask), NotificationManager.IMPORTANCE_DEFAULT)
     val n = NotificationCompat.Builder(context, "ask")
         .setSmallIcon(R.drawable.ic_watch)
-        .setContentTitle(if (write) "$pkg wants to read and change data on ${cap.removePrefix("http:")}" else "$pkg wants ${capLabel(cap)}")
-        .setContentText("Allow or deny it in FMC Companion.")
+        .setContentTitle(askTitle(context, pkg, cap, write))
+        .setContentText(context.getString(R.string.ask_text))
         .setContentIntent(appsIntent(context, pkg))
         .setAutoCancel(true)
         .build()
@@ -163,21 +165,21 @@ fun postAlert(context: Context, pkg: String, a: tools.fmc.companion.wire.PhoneAl
     val nm = context.getSystemService(NotificationManager::class.java)
     val id = when {
         a.find -> "find-phone".also {
-            nm.createNotificationChannel(NotificationChannel(it, "Find my phone", NotificationManager.IMPORTANCE_HIGH).apply {
+            nm.createNotificationChannel(NotificationChannel(it, context.getString(R.string.find_phone), NotificationManager.IMPORTANCE_HIGH).apply {
                 setSound(android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM),
                     android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_ALARM)
                         .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
                 enableVibration(true)
             })
         }
-        a.sound -> "watch-apps".also { channel(context, it, "From watch apps", NotificationManager.IMPORTANCE_DEFAULT) }
-        else -> "watch-apps-quiet".also { channel(context, it, "From watch apps, silent", NotificationManager.IMPORTANCE_LOW) }
+        a.sound -> "watch-apps".also { channel(context, it, context.getString(R.string.channel_watch_apps), NotificationManager.IMPORTANCE_DEFAULT) }
+        else -> "watch-apps-quiet".also { channel(context, it, context.getString(R.string.channel_watch_apps_silent), NotificationManager.IMPORTANCE_LOW) }
     }
     val app = StoreApps.listing(pkg)?.name ?: pkg
     val n = NotificationCompat.Builder(context, id)
         .setSmallIcon(R.drawable.ic_watch)
-        .setContentTitle(if (a.find) "Find my phone" else a.title.ifEmpty { app })
-        .setContentText(if (a.find && a.body.isEmpty()) "$app on your watch is looking for this phone." else a.body)
+        .setContentTitle(if (a.find) context.getString(R.string.find_phone) else a.title.ifEmpty { app })
+        .setContentText(if (a.find && a.body.isEmpty()) context.getString(R.string.find_phone_text, app) else a.body)
         .setContentIntent(appsIntent(context, pkg))
         .setAutoCancel(true)
         .apply { if (a.find) setCategory(NotificationCompat.CATEGORY_ALARM).setPriority(NotificationCompat.PRIORITY_MAX) }
@@ -224,10 +226,10 @@ class Jobs(context: Context) {
 fun jobLabel(j: RefreshJob): String {
     val what = when (j.kind) {
         tools.fmc.companion.wire.JobKind.HTTP -> tools.fmc.companion.wire.parseHttpCall(j.spec)
-            ?.let { "${it.method} ${it.url.removePrefix("https://")}" } ?: "Web request"
-        tools.fmc.companion.wire.JobKind.WEATHER -> "Weather"
-        else -> "Calendar"
+            ?.let { "${it.method} ${it.url.removePrefix("https://")}" } ?: str(R.string.job_web_request)
+        tools.fmc.companion.wire.JobKind.WEATHER -> str(R.string.cap_weather)
+        else -> str(R.string.cap_calendar)
     }
-    val into = if (j.target == tools.fmc.companion.wire.PushKind.WIDGET) " → widget" else ""
-    return "Every ${if (j.minutes % 60 == 0) "${j.minutes / 60} h" else "${j.minutes} min"}: $what$into"
+    val into = if (j.target == tools.fmc.companion.wire.PushKind.WIDGET) str(R.string.job_into_widget, what) else what
+    return if (j.minutes % 60 == 0) str(R.string.job_every_h, j.minutes / 60, into) else str(R.string.job_every_min, j.minutes, into)
 }

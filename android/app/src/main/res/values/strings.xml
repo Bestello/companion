@@ -1,3 +1,273 @@
 <resources>
-    <string name="app_name">FMC Companion</string>
+    <string name="app_name" translatable="false">FMC Companion</string>
+
+    <!-- Tabs and common -->
+    <string name="watch_faces">Watch faces</string>
+    <string name="apps">Apps</string>
+    <string name="watch">Watch</string>
+    <string name="watch_apps">Watch apps</string>
+    <string name="back">Back</string>
+    <string name="cancel">Cancel</string>
+    <string name="ok">OK</string>
+    <string name="delete">Delete</string>
+    <string name="install">Install</string>
+    <string name="installing">Installing…</string>
+    <string name="installed">Installed</string>
+    <string name="update">Update</string>
+    <string name="loading">Loading…</string>
+    <string name="open_on_fmc">Open on fmc.tools</string>
+    <string name="install_failed">Couldn\'t install</string>
+    <string name="on_the_watch">On the watch</string>
+    <string name="close_nothing_x_title">Close Nothing X first</string>
+
+    <!-- Catalog -->
+    <string name="my_watch_faces">My watch faces</string>
+    <string name="liked">Liked</string>
+    <string name="sort">Sort</string>
+    <string name="sort_newest">Newest</string>
+    <string name="sort_popular">Popular</string>
+    <string name="sort_most_downloaded">Most downloaded</string>
+    <string name="selected">Selected</string>
+    <string name="shelf_all">All</string>
+    <string name="shelf_mine">Mine</string>
+    <string name="search_placeholder">Name or author</string>
+    <string name="catalog_load_failed">Couldn\'t load watch faces</string>
+    <string name="catalog_error">Couldn\'t load watch faces\n%1$s</string>
+    <string name="nothing_found">Nothing found</string>
+    <string name="no_watch_faces_yet">No watch faces yet</string>
+    <string name="no_liked_watch_faces">No liked watch faces</string>
+    <string name="draft">Draft</string>
+
+    <!-- Watch face page -->
+    <string name="face_load_failed">Couldn\'t load the watch face</string>
+    <string name="face_load_error">Couldn\'t load the watch face\n%1$s</string>
+    <string name="watch_no_answer">The watch did not answer.</string>
+    <string name="made_for_other">⚠ Made for the %1$s. It may not work on the Watch Pro 2.</string>
+    <string name="close_nothing_x_hint">Close Nothing X before installing: the watch talks to one app at a time.</string>
+    <string name="author">Author</string>
+    <string name="downloads">Downloads</string>
+    <string name="likes">Likes</string>
+    <string name="about">About</string>
+    <string name="close_nothing_x_face">The watch talks to one app at a time. Close Nothing X (swipe it away in Recents), then install.\n\nAfterwards Nothing X may not see the watch. Then forget the watch in Bluetooth settings and add it again in Nothing X.</string>
+    <string name="large_images_title">Large images</string>
+    <string name="large_images_text">This face has a %1$d×%2$d px image, larger than factory faces use. Large images can make the watch restart in a loop.</string>
+    <string name="install_anyway">Install anyway</string>
+    <string name="watch_full_title">The watch is full</string>
+    <string name="watch_full_pick">Pick the face to replace. Faces are in the order the watch shows them.</string>
+    <string name="refusal_aod">The always-on screen of this face has no thumbnail. Faces like this made the screen flash on a watch. Open it in the editor on fmc.tools and install it from there.</string>
+    <string name="refusal_image_too_big">An image of this face is %1$d×%2$d px. Over %3$d px can make the watch restart in a loop.</string>
+    <string name="refusal_not_face">This file is not a watch face.</string>
+    <string name="face_no_file">This watch face has no file.</string>
+    <string name="face_slot">Face %1$d</string>
+    <string name="watch_full_error">The watch is full. Delete a face on the watch (long press the face, swipe one up) and try again.</string>
+
+    <!-- Watch tab -->
+    <string name="downloading_update">Downloading %1$s…</string>
+    <string name="update_to">Update to %1$s</string>
+    <string name="watch_footer">Keep the watch connected in Nothing X. The app only reads from it.</string>
+    <string name="faces_read_failed">Couldn\'t read the faces on the watch: %1$s</string>
+    <string name="faces_change_failed">Couldn\'t change the faces on the watch: %1$s</string>
+    <string name="delete_face_title">Delete %1$s?</string>
+    <string name="delete_face_text">It goes from the watch. To get it back, install it again.</string>
+    <string name="watch_faces_count">Watch faces · %1$d</string>
+    <string name="show_on_watch">Show on the watch</string>
+    <string name="reading_watch">Reading the watch…</string>
+    <string name="connect_to_see_faces">Connect to see the faces on the watch.</string>
+    <string name="firmware">Firmware</string>
+    <string name="developer_options">Developer</string>
+    <string name="language">Language</string>
+    <string name="settings">Settings</string>
+    <string name="services_footer">Watch apps ask for your calendar, location, weather, notifications or a website. You answer each one on the Apps tab.</string>
+    <string name="services_switch">Services for watch apps</string>
+    <string name="fmc_account">FMC account</string>
+    <string name="signed_in">Signed in</string>
+    <string name="sign_out">Sign out</string>
+    <string name="delete_account">Delete account</string>
+    <string name="sign_in">Sign in</string>
+    <string name="delete_account_title">Delete your FMC account?</string>
+    <string name="delete_account_text">This removes your account and profile on fmc.tools. It can\'t be undone.</string>
+    <string name="delete_account_failed">Couldn\'t delete the account</string>
+    <string name="status_updating">Updating</string>
+    <string name="status_not_connected">Not connected</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_connected">Connected</string>
+    <string name="status_failed">Couldn\'t connect</string>
+    <string name="status_installing_update">The watch is installing the update…</string>
+    <string name="status_tap_connect">Tap Connect to read it</string>
+    <string name="status_takes_seconds">This takes a few seconds</string>
+    <string name="status_ready">Ready for watch faces</string>
+    <string name="status_loader_found">App Loader found</string>
+    <string name="connect">Connect</string>
+    <string name="check_again">Check again</string>
+    <string name="watch_read_failed">Couldn\'t read the watch.</string>
+
+    <!-- Sign in -->
+    <string name="sign_in_failed">Sign-in failed</string>
+    <string name="sign_in_interrupted">Sign-in was interrupted</string>
+    <string name="sign_in_title">Sign in to FMC</string>
+    <string name="sign_in_tagline">Your fmc.tools account, for watch faces on your watch.</string>
+    <string name="email">Email</string>
+    <string name="password">Password</string>
+    <string name="or">or</string>
+    <string name="continue_with">Continue with %1$s</string>
+    <string name="sign_up_hint">No account? Sign up at fmc.tools</string>
+
+    <!-- Apps -->
+    <string name="nearby_warning">Anyone nearby with a Bluetooth scanner could read what goes to the watch, location included (rounded to about 10 km).</string>
+    <string name="not_on_watch">Not on the watch</string>
+    <string name="app_version_update">Version %1$s → %2$s · slot %3$d</string>
+    <string name="app_version">Version %1$s · slot %2$d</string>
+    <string name="order_loader_missing">Couldn\'t load the App Loader from fmc.tools to send the order. Pull to refresh to try again.</string>
+    <string name="order_busy">The Apps menu or an app is open on the watch. The order goes when you\'re back on the watch face and refresh.</string>
+    <string name="order_old_loader">The App Loader on fmc.tools is older than the app order. The order stays on this phone for now.</string>
+    <string name="order_send_failed">Couldn\'t send the order: %1$s</string>
+    <string name="done">Done</string>
+    <string name="edit">Edit</string>
+    <string name="fmc_store">FMC store</string>
+    <string name="connect_to_install_apps">Connect on the Watch tab to install apps.</string>
+    <string name="order_footer">Set the order of the Apps menu on the watch. It goes to the watch inside the App Loader (about 54 KB) when you tap Done.</string>
+    <string name="move_up">Move %1$s up</string>
+    <string name="move_down">Move %1$s down</string>
+    <string name="updates">Updates</string>
+    <string name="updates_footer">Updates install over Bluetooth. Keep the app closed on the watch meanwhile.</string>
+    <string name="sending_order">Sending the order to the watch…</string>
+    <string name="no_apps">No apps</string>
+    <string name="store_load_failed">Couldn\'t load the FMC store.</string>
+    <string name="connect_to_see_apps">Connect on the Watch tab to see the apps on the watch.</string>
+    <string name="connect_to_install">Connect on the Watch tab to install.</string>
+    <string name="description">Description</string>
+    <string name="information">Information</string>
+    <string name="app_developer">Developer</string>
+    <string name="version">Version</string>
+    <string name="slot_value">%1$s · slot %2$d</string>
+    <string name="loader_abi">Loader ABI</string>
+    <string name="source_code">Source code</string>
+    <string name="version_out">Version %1$s is out</string>
+    <string name="view_in_store">View in the Store</string>
+    <string name="delete_app_footer">Removes %1$s and its data from the watch, and forgets its permissions.</string>
+    <string name="delete_from_watch">Delete from the Watch</string>
+    <string name="background_refresh">Background refresh</string>
+    <string name="background_refresh_footer">%1$s asked the phone to fetch these on its own, for its widget or page on the watch. They run while the phone is connected to the watch.</string>
+    <string name="asked_nothing">%1$s hasn\'t asked for anything on your phone.</string>
+    <string name="allow_access">Allow %1$s to access</string>
+    <string name="some_off_in_settings">Some of these are off for FMC Companion in Android settings.</string>
+    <string name="waiting_answer">Waiting for your answer</string>
+    <string name="off_in_settings">Off in system settings. Tap to turn on.</string>
+    <string name="headers">Headers</string>
+    <string name="none">None</string>
+    <string name="show_text">Show text on the watch</string>
+    <string name="show_text_detail">Calendar titles and notification text</string>
+    <string name="open_app_settings">Open app settings</string>
+    <string name="asks_again">%1$s asks again the next time it needs something.</string>
+    <string name="reset_permissions">Reset permissions</string>
+    <string name="reset_permissions_title">Reset permissions for %1$s?</string>
+    <string name="reset">Reset</string>
+    <string name="cap_calendar">Calendar</string>
+    <string name="cap_location">Location</string>
+    <string name="cap_weather">Weather</string>
+    <string name="cap_notifications">Notifications</string>
+    <string name="cap_notify">Send notifications</string>
+    <string name="cap_media">Media</string>
+    <string name="app_busy">%1$s or the Apps menu is open on the watch. Go back to the watch face, then try again.</string>
+    <string name="app_install_failed">Couldn\'t install %1$s: %2$s</string>
+    <string name="app_running">%1$s is running on the watch. If it is a page next to the watch face, remove the page first: on the watch, long press %1$s in Apps → Remove page. Else go back to the watch face. Then try again.</string>
+    <string name="app_delete_failed">Couldn\'t delete %1$s: %2$s</string>
+    <string name="delete_app_title">Delete %1$s from the watch?</string>
+    <string name="delete_app_text">Its data on the watch goes too.</string>
+    <string name="get">Get</string>
+    <string name="info_downloads">DOWNLOADS</string>
+    <string name="info_version">VERSION</string>
+    <string name="info_developer">DEVELOPER</string>
+    <string name="info_slot">SLOT</string>
+    <string name="info_on_watch">on the watch</string>
+    <string name="headers_footer">Sent with every request %1$s makes to %2$s. They stay on this phone, encrypted, and never go to the watch.</string>
+    <string name="header_name">Name</string>
+    <string name="header_value">Value</string>
+    <string name="add_header">Add header</string>
+
+    <!-- Firmware -->
+    <string name="fw_draft">%1$s (draft)</string>
+    <string name="fw_check_failed">Couldn\'t check for updates: %1$s</string>
+    <string name="fw_downloading">Downloading the firmware…</string>
+    <string name="fw_connecting">Connecting to the watch…</string>
+    <string name="fw_sending">Sending the firmware…</string>
+    <string name="fw_update_failed">Couldn\'t update the firmware: %1$s</string>
+    <string name="loader_busy_stub6">An app or the Apps menu is open on the watch. Go back to the watch face, then try again.</string>
+    <string name="loader_busy">The App Loader is running on the watch. Close the Apps menu and any running app, and remove the watch app pages and widgets you added, then try again. Patched firmware with stub 6 or later doesn\'t need this.</string>
+    <string name="loader_update_failed">Couldn\'t update the App Loader: %1$s</string>
+    <string name="close_nothing_x_firmware">The watch talks to one app at a time. Close Nothing X (swipe it away in Recents), then install.\n\nThe watch should be charged and the phone next to it. Keep this screen open until the update is sent; the watch then installs it and restarts.\n\nAfterwards Nothing X may not see the watch. Then forget the watch in Bluetooth settings and add it again in Nothing X.</string>
+    <string name="connect_to_read_watch">Connect on the Watch tab to read the watch.</string>
+    <string name="fw_patched">Patched · stub %1$d</string>
+    <string name="fw_stock">Stock</string>
+    <string name="not_installed">Not installed</string>
+    <string name="fw_left_min">, about %1$d min %2$d s left</string>
+    <string name="fw_left_s">, about %1$d s left</string>
+    <string name="fw_sending_progress">Sending the firmware: %1$d%%%2$s. Keep the phone next to the watch and this screen open.</string>
+    <string name="fw_installing_footer">The watch is installing the update and restarts by itself, which takes a few minutes. The app reads it every 20 seconds until it\'s back.</string>
+    <string name="fw_no_answer">Firmware sent, but the watch hasn\'t answered with it in 10 minutes. Check the watch, then connect again on the Watch tab.</string>
+    <string name="fw_offer">The firmware is about 57 MB. Before installing: charge the watch, keep the phone next to it, and close Nothing X.</string>
+    <string name="fw_version_stub">%1$s · stub %2$d</string>
+    <string name="up_to_date">Up to date</string>
+    <string name="check_for_updates">Check for updates</string>
+
+    <!-- Errors from the link and the network -->
+    <string name="ble_off">Bluetooth is off.</string>
+    <string name="ble_no_watch">No watch found. Open Nothing X and make sure the watch is connected.</string>
+    <string name="ble_missing">This watch does not offer the expected services.</string>
+    <string name="ble_dropped">The watch disconnected.</string>
+    <string name="ble_not_taken">The watch did not take the request.</string>
+    <string name="ble_gatt_error">GATT error %1$d</string>
+    <string name="request_failed">Request failed (%1$d)</string>
+    <string name="download_failed">Download failed (%1$d)</string>
+    <string name="too_many_redirects">Too many redirects</string>
+    <string name="update_download_failed">Couldn\'t download the update.</string>
+    <string name="update_install_failed">Couldn\'t install the update.</string>
+
+    <!-- Notifications -->
+    <string name="channel_ask">Watch app requests</string>
+    <string name="ask_calendar">%1$s wants your calendar</string>
+    <string name="ask_location">%1$s wants your location</string>
+    <string name="ask_weather">%1$s wants the weather where you are</string>
+    <string name="ask_notifications">%1$s wants your notifications</string>
+    <string name="ask_notify">%1$s wants to send you notifications</string>
+    <string name="ask_media">%1$s wants what plays on your phone, and to control it</string>
+    <string name="ask_http">%1$s wants data from %2$s</string>
+    <string name="ask_http_write">%1$s wants to read and change data on %2$s</string>
+    <string name="ask_text">Allow or deny it in FMC Companion.</string>
+    <string name="find_phone">Find my phone</string>
+    <string name="find_phone_text">%1$s on your watch is looking for this phone.</string>
+    <string name="channel_watch_apps">From watch apps</string>
+    <string name="channel_watch_apps_silent">From watch apps, silent</string>
+    <string name="job_web_request">Web request</string>
+    <string name="job_into_widget">%1$s → widget</string>
+    <string name="job_every_h">Every %1$d h: %2$s</string>
+    <string name="job_every_min">Every %1$d min: %2$s</string>
+    <string name="channel_service">Watch app services</string>
+    <string name="service_title">Watch apps can reach your phone</string>
+    <string name="service_text">Calendar, weather and the rest, as you allowed them.</string>
+
+    <!-- Developer -->
+    <string name="share">Share</string>
+    <string name="clear">Clear</string>
+    <string name="rpc_log">RPC log</string>
+    <string name="rpc_log_footer">BG: the app was in the background when it happened.</string>
+    <string name="rpc_log_empty">Nothing yet. Requests from watch apps show up here.</string>
+    <string name="clear_log_title">Clear the RPC log?</string>
+
+    <plurals name="author_faces">
+        <item quantity="one">%1$s watch face</item>
+        <item quantity="other">%1$s watch faces</item>
+    </plurals>
+    <plurals name="author_downloads">
+        <item quantity="one">%1$s download</item>
+        <item quantity="other">%1$s downloads</item>
+    </plurals>
+    <plurals name="author_likes">
+        <item quantity="one">%1$s like</item>
+        <item quantity="other">%1$s likes</item>
+    </plurals>
+    <plurals name="no_free_slot">
+        <item quantity="one">The %1$d app slot on the watch is taken.</item>
+        <item quantity="other">All %1$d app slots on the watch are taken.</item>
+    </plurals>
 </resources>

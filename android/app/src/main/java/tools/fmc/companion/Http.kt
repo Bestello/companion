@@ -34,7 +34,7 @@ suspend fun http(method: String, url: String, json: JSONObject? = null, token: S
             val body = (if (status in 200..299) c.inputStream else c.errorStream)?.use { String(it.readBytes()) } ?: ""
             if (status !in 200..299) {
                 val message = runCatching { JSONObject(body).getString("message") }.getOrNull()
-                throw ServerError(status, message ?: "Request failed ($status)")
+                throw ServerError(status, message ?: str(R.string.request_failed, status))
             }
             body
         } finally {
@@ -47,7 +47,7 @@ suspend fun download(url: String, first: Int? = null): ByteArray = withContext(D
     val c = URL(url).openConnection() as HttpURLConnection
     try {
         first?.let { c.setRequestProperty("Range", "bytes=0-${it - 1}") }
-        if (c.responseCode !in 200..299) throw ServerError(c.responseCode, "Download failed (${c.responseCode})")
+        if (c.responseCode !in 200..299) throw ServerError(c.responseCode, str(R.string.download_failed, c.responseCode))
         c.inputStream.use { it.readBytes() }
     } finally {
         c.disconnect()
@@ -87,7 +87,7 @@ suspend fun fetch(
             return@withContext r.code to (r.body?.byteStream()?.use { readUpTo(it, max + 1) } ?: ByteArray(0))
         }
     }
-    throw ServerError(310, "Too many redirects")
+    throw ServerError(310, str(R.string.too_many_redirects))
 }
 
 /** InputStream.readNBytes is API 33. */

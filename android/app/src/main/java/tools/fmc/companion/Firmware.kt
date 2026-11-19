@@ -1,5 +1,7 @@
 package tools.fmc.companion
 
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
 import android.content.Context
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -109,7 +111,7 @@ object FirmwareModel {
                 "&fields=id,collectionId,name,kind,version,image,stub,published", token = token)).getJSONArray("items")
             val records = (0 until items.length()).map(items::getJSONObject)
             fun release(kind: String) = records.firstOrNull { it.optString("kind") == kind }?.let {
-                Release(it.optString("name") + if (it.optBoolean("published") || it.optString("name").contains("draft", true)) "" else " (draft)", it.optString("version"), it.optLong("stub"),
+                Release(it.optString("name").let { n -> if (it.optBoolean("published") || n.contains("draft", true)) n else str(R.string.fw_draft, n) }, it.optString("version"), it.optLong("stub"),
                     "$FMC/api/files/${it.getString("collectionId")}/${it.getString("id")}/${it.getString("image")}")
             }
             val loader = release("loader")
@@ -119,7 +121,7 @@ object FirmwareModel {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            error = "Couldn't check for updates: ${e.message}"
+            error = str(R.string.fw_check_failed, e.message.toString())
         } finally {
             checking = false
         }
@@ -133,7 +135,7 @@ object FirmwareModel {
     suspend fun flashFirmware(context: Context, model: AppModel) {
         val file = check?.firmware?.file ?: return
         if (flash != null) return
-        flash = Flash("Downloading the firmware…")
+        flash = Flash(str(R.string.fw_downloading))
         flashed = false
         error = null
         val services = model.services
@@ -141,13 +143,13 @@ object FirmwareModel {
             val image = download(file)
             // 57 MB of CRCs: off the main thread
             val info = withContext(Dispatchers.Default) { inspectOtaImage(image) }
-            flash = Flash("Connecting to the watch…")
+            flash = Flash(str(R.string.fw_connecting))
             if (services) RpcService.stop(context)
             withStockSession(context, model.store, before = { checkOtaTarget(info, it.watchName) }) { session, _ ->
-                flash = Flash("Sending the firmware…")
+                flash = Flash(str(R.string.fw_sending))
                 session.flashFirmware(image) { p ->
                     val f = flash
-                    flash = Flash("Sending the firmware…", p, if (f?.percent == null) System.currentTimeMillis() else f.started)
+                    flash = Flash(str(R.string.fw_sending), p, if (f?.percent == null) System.currentTimeMillis() else f.started)
                 }
             }
             DevLog.log(context, "Firmware sent: ${check?.firmware?.version}")
@@ -157,7 +159,7 @@ object FirmwareModel {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            error = "Couldn't update the firmware: ${e.message}"
+            error = str(R.string.fw_update_failed, e.message.toString())
         } finally {
             flash = null
             if (services) RpcService.start(context)
@@ -186,10 +188,10 @@ object FirmwareModel {
             // stub 6 takes the install behind a page and reloads it there (cmf-watch-sdk docs/abi-1.4.md): busy is
             // then only what is on screen
             error = if ((model.loader?.stub?.version ?: 0) >= 6)
-                "An app or the Apps menu is open on the watch. Go back to the watch face, then try again."
-            else "The App Loader is running on the watch. Close the Apps menu and any running app, and remove the watch app pages and widgets you added, then try again. Patched firmware with stub 6 or later doesn't need this."
+                str(R.string.loader_busy_stub6)
+            else str(R.string.loader_busy)
         } catch (e: Exception) {
-            error = "Couldn't update the App Loader: ${e.message}"
+            error = str(R.string.loader_update_failed, e.message.toString())
         } finally {
             progress = null
         }
@@ -218,15 +220,13 @@ fun FirmwareScreen(model: AppModel, back: () -> Unit) {
     if (tick < 0) return // reading tick recomposes the time left each second
     if (confirmFlash) AlertDialog(
         onDismissRequest = { confirmFlash = false },
-        title = { Text("Close Nothing X first") },
+        title = { Text(stringResource(R.string.close_nothing_x_title)) },
         text = {
-            Text("The watch talks to one app at a time. Close Nothing X (swipe it away in Recents), then install.\n\n" +
-                "The watch should be charged and the phone next to it. Keep this screen open until the update is sent; the watch then installs it and restarts.\n\n" +
-                "Afterwards Nothing X may not see the watch. Then forget the watch in Bluetooth settings and add it again in Nothing X.")
+            Text(stringResource(R.string.close_nothing_x_firmware))
         },
         // the model's scope: leaving the page doesn't cut the update short
-        confirmButton = { TextButton({ confirmFlash = false; model.viewModelScope.launch { fm.flashFirmware(context, model) } }) { Text("Install") } },
-        dismissButton = { TextButton({ confirmFlash = false }) { Text("Cancel") } },
+        confirmButton = { TextButton({ confirmFlash = false; model.viewModelScope.launch { fm.flashFirmware(context, model) } }) { Text(stringResource(R.string.install)) } },
+        dismissButton = { TextButton({ confirmFlash = false }) { Text(stringResource(R.string.cancel)) } },
     )
 
     @Composable
@@ -240,18 +240,18 @@ fun FirmwareScreen(model: AppModel, back: () -> Unit) {
         }
 
     Column {
-        Bar("Firmware", back)
+        Bar(stringResource(R.string.firmware), back)
         LazyColumn {
             item {
-                Section("On the watch", footer = if (connected) null else "Connect on the Watch tab to read the watch.") {
-                    row("Firmware") {
-                        Text(when { model.installing -> "Installing…"; state != null -> "Patched · stub ${state.stub.version}"; connected -> "Stock"; else -> "—" },
+                Section(stringResource(R.string.on_the_watch), footer = if (connected) null else stringResource(R.string.connect_to_read_watch)) {
+                    row(stringResource(R.string.firmware)) {
+                        Text(when { model.installing -> stringResource(R.string.installing); state != null -> stringResource(R.string.fw_patched, state.stub.version); connected -> stringResource(R.string.fw_stock); else -> "—" },
                             color = Fmc.secondary)
                     }
                     HorizontalDivider()
                     row("App Loader") {
                         val l = state?.loader
-                        Text(when { l != null -> "%08x".format(l.crc); state != null -> "Not installed"; else -> "—" },
+                        Text(when { l != null -> "%08x".format(l.crc); state != null -> stringResource(R.string.not_installed); else -> "—" },
                             color = Fmc.secondary, fontFamily = if (l != null) FontFamily.Monospace else null)
                     }
                 }
@@ -262,23 +262,23 @@ fun FirmwareScreen(model: AppModel, back: () -> Unit) {
                 val f = fm.flash
                 val footer = when {
                     f != null -> f.percent?.let { p ->
-                        val left = f.left?.let { s -> if (s >= 60) ", about ${s / 60} min ${s % 60} s left" else ", about $s s left" } ?: ""
-                        "Sending the firmware: $p%$left. Keep the phone next to the watch and this screen open."
+                        val left = f.left?.let { s -> if (s >= 60) stringResource(R.string.fw_left_min, s / 60, s % 60) else stringResource(R.string.fw_left_s, s) } ?: ""
+                        stringResource(R.string.fw_sending_progress, p, left)
                     } ?: f.step
-                    model.installing -> "The watch is installing the update and restarts by itself, which takes a few minutes. The app reads it every 20 seconds until it's back."
-                    fm.flashed -> "Firmware sent, but the watch hasn't answered with it in 10 minutes. Check the watch, then connect again on the Watch tab."
-                    offer -> "The firmware is about 57 MB. Before installing: charge the watch, keep the phone next to it, and close Nothing X."
+                    model.installing -> stringResource(R.string.fw_installing_footer)
+                    fm.flashed -> stringResource(R.string.fw_no_answer)
+                    offer -> stringResource(R.string.fw_offer)
                     else -> null
                 }
                 Section("fmc.tools", footer = footer) {
                     fm.check?.firmware?.let { fw ->
-                        row(fw.name, "${fw.version} · stub ${fw.stub}") {
+                        row(fw.name, stringResource(R.string.fw_version_stub, fw.version, fw.stub)) {
                             when {
                                 f != null -> Text(f.percent?.let { "$it%" } ?: "", color = Fmc.secondary)
                                 offer -> Button({ confirmFlash = true }, enabled = fm.progress == null) {
-                                    Text(if (state == null) "Install" else "Update")
+                                    Text(if (state == null) stringResource(R.string.install) else stringResource(R.string.update))
                                 }
-                                else -> Text(if (state == null) "" else "Up to date", color = Fmc.secondary)
+                                else -> Text(if (state == null) "" else stringResource(R.string.up_to_date), color = Fmc.secondary)
                             }
                         }
                         // the whole row's width: a 57 MB update is long enough to watch
@@ -297,16 +297,16 @@ fun FirmwareScreen(model: AppModel, back: () -> Unit) {
                                 // the model's scope: leaving the page doesn't cut an install short
                                 fm.loaderUpdate(state) -> Button({ model.viewModelScope.launch { fm.updateLoader(context, model) } },
                                     enabled = fm.check?.loaderPackage != null) {
-                                    Text(if (state?.loader == null) "Install" else "Update")
+                                    Text(if (state?.loader == null) stringResource(R.string.install) else stringResource(R.string.update))
                                 }
-                                else -> Text(if (state == null) "" else "Up to date", color = Fmc.secondary)
+                                else -> Text(if (state == null) "" else stringResource(R.string.up_to_date), color = Fmc.secondary)
                             }
                         }
                         HorizontalDivider()
                     }
                     Row(Modifier.fillMaxWidth().clickable(enabled = !fm.checking) { scope.launch { fm.refresh(model.account.token) } },
                         verticalAlignment = Alignment.CenterVertically) {
-                        Text("Check for updates", Modifier.weight(1f))
+                        Text(stringResource(R.string.check_for_updates), Modifier.weight(1f))
                         if (fm.checking) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                     }
                     fm.error?.let { Text(it, color = Fmc.danger, style = MaterialTheme.typography.bodySmall) }

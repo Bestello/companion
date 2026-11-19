@@ -117,7 +117,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
             items.forEach(::remember)
             if (hasLikesCount == false) runCatching { Catalog.countLikes(items) }.onSuccess { counts = counts + it }
         } catch (e: Exception) {
-            if (gen == generation && e !is kotlinx.coroutines.CancellationException) catalogError = e.message ?: "Couldn't load watch faces"
+            if (gen == generation && e !is kotlinx.coroutines.CancellationException) catalogError = e.message ?: str(R.string.catalog_load_failed)
         } finally {
             if (gen == generation) catalogLoading = false
         }
@@ -261,7 +261,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         phase = try {
             Phase.Checked(readWatch(getApplication(), store))
         } catch (e: Exception) {
-            Phase.Failed(e.message ?: "Couldn't read the watch.")
+            Phase.Failed(e.message ?: str(R.string.watch_read_failed))
         }
         lastLoader = loader
         // an order the watch refused with Busy goes now

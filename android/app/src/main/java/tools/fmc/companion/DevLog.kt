@@ -1,5 +1,7 @@
 package tools.fmc.companion
 
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
 import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
@@ -82,18 +84,18 @@ fun DeveloperScreen(back: () -> Unit) {
     val lines = remember { DevLog.lines(context) }
     var clearing by remember { mutableStateOf(false) }
     Column {
-        Bar("Developer", back) {
+        Bar(stringResource(R.string.developer_options), back) {
             IconButton({
                 // ponytail: shared as text, no FileProvider; a file share if the log outgrows a share sheet
                 context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
                     .putExtra(Intent.EXTRA_SUBJECT, "rpc.log").putExtra(Intent.EXTRA_TEXT, lines.joinToString("\n")), null))
-            }, enabled = lines.isNotEmpty()) { Icon(Icons.Default.Share, "Share") }
-            IconButton({ clearing = true }, enabled = lines.isNotEmpty()) { Icon(Icons.Default.Delete, "Clear") }
+            }, enabled = lines.isNotEmpty()) { Icon(Icons.Default.Share, stringResource(R.string.share)) }
+            IconButton({ clearing = true }, enabled = lines.isNotEmpty()) { Icon(Icons.Default.Delete, stringResource(R.string.clear)) }
         }
         LazyColumn {
             item {
-                Section("RPC log", footer = "BG: the app was in the background when it happened.") {
-                    if (lines.isEmpty()) Text("Nothing yet. Requests from watch apps show up here.", color = Fmc.secondary)
+                Section(stringResource(R.string.rpc_log), footer = stringResource(R.string.rpc_log_footer)) {
+                    if (lines.isEmpty()) Text(stringResource(R.string.rpc_log_empty), color = Fmc.secondary)
                     SelectionContainer {
                         Column {
                             lines.asReversed().forEach {
@@ -108,8 +110,8 @@ fun DeveloperScreen(back: () -> Unit) {
     }
     if (clearing) AlertDialog(
         onDismissRequest = { clearing = false },
-        title = { Text("Clear the RPC log?") },
-        confirmButton = { TextButton({ clearing = false; DevLog.clear(context) }) { Text("Clear", color = Fmc.danger) } },
-        dismissButton = { TextButton({ clearing = false }) { Text("Cancel") } },
+        title = { Text(stringResource(R.string.clear_log_title)) },
+        confirmButton = { TextButton({ clearing = false; DevLog.clear(context) }) { Text(stringResource(R.string.clear), color = Fmc.danger) } },
+        dismissButton = { TextButton({ clearing = false }) { Text(stringResource(R.string.cancel)) } },
     )
 }

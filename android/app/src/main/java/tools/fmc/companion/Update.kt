@@ -71,7 +71,7 @@ object AppUpdate {
                 }
             }
         } catch (e: Exception) {
-            error = e.message ?: "Couldn't download the update."
+            error = e.message ?: str(R.string.update_download_failed)
         } finally {
             progress = null
         }
@@ -92,7 +92,7 @@ object AppUpdate {
                             ?.let { c.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                     PackageInstaller.STATUS_SUCCESS -> {}
                     PackageInstaller.STATUS_FAILURE_ABORTED -> {}
-                    else -> error = i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Couldn't install the update."
+                    else -> error = i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: str(R.string.update_install_failed)
                 }
             }
         }, IntentFilter(ACTION), Context.RECEIVER_NOT_EXPORTED)
