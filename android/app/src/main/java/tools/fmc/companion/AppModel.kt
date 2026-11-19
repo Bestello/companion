@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
 import tools.fmc.companion.wire.LoaderState
+import tools.fmc.companion.wire.dialId
 
 sealed interface Phase {
     data object Idle : Phase
@@ -28,28 +29,167 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         private set
     var providers by mutableStateOf<List<OAuthProvider>>(emptyList())
         private set
-    var all by mutableStateOf<List<Watchface>>(emptyList())
+    /** The catalog list on screen, as [query] asked for it (Catalog.kt). */
+    var query by mutableStateOf(CatalogQuery())
         private set
-    var mine by mutableStateOf<List<Watchface>>(emptyList())
+    var faces by mutableStateOf<List<Watchface>>(emptyList())
+        private set
+    var catalogLoading by mutableStateOf(false)
+        private set
+    /** The last page came short: nothing more to ask for. */
+    var catalogEnd by mutableStateOf(false)
         private set
     var catalogError by mutableStateOf<String?>(null)
         private set
-    /** Every like on fmc.tools: counts and the user's own. */
-    var likes by mutableStateOf<List<Catalog.Like>>(emptyList())
+    /** Like counts: from each face's likes_count, then moved by the user's own taps. */
+    var counts by mutableStateOf<Map<String, Int>>(emptyMap())
         private set
+    /** The signed-in user's likes: face id → like id ("" while the create is in flight). */
+    var myLikes by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
+    /** Faces of the Watch tab's dials, by dial id: from the lists loaded and from the slim index. */
+    var dials by mutableStateOf<Map<Long, DialFace>>(emptyMap())
+        private set
+    private var page = 0
+    /** Bumped by each new query: a page that comes back for an older one is dropped. */
+    private var generation = 0
+    /** Whether the server has watchfaces.likes_count; null until a list says. */
+    private var hasLikesCount: Boolean? = null
+    private val known = mutableMapOf<String, Watchface>()
+    // the first page of each sort and the dial index: the system may clear cacheDir, the next launch refills it
+    private val cacheDir = java.io.File(app.cacheDir, "catalog")
 
-    fun likeCount(face: Watchface) = likes.count { it.watchface == face.id }
-    fun liked(face: Watchface) = user?.let { u -> likes.any { it.watchface == face.id && it.user == u.id } } ?: false
+    fun likeCount(face: Watchface) = counts[face.id] ?: face.likesCount ?: 0
+    fun liked(face: Watchface) = myLikes.containsKey(face.id)
 
-    suspend fun loadLikes() { runCatching { Catalog.likes() }.onSuccess { likes = it } }
+    /** Shows [q]: from its first page again when it changed, else as it is. */
+    suspend fun show(q: CatalogQuery) {
+        if (q == query && (faces.isNotEmpty() || catalogLoading)) return
+        query = q
+        generation++
+        page = 0
+        catalogEnd = false
+        catalogError = null
+        faces = q.cacheName?.let { cached(it) }?.let { runCatching { Catalog.parse(it) }.getOrNull() } ?: emptyList()
+        faces.forEach(::remember)
+        loadPage()
+    }
 
-    /** Likes or unlikes as the signed-in user, then reloads the likes (toggleLikeFx). */
+    /** Pull to refresh: the first page again, the list on screen until it comes. */
+    suspend fun refresh() {
+        generation++
+        page = 0
+        catalogEnd = false
+        loadMyLikes()
+        loadPage()
+    }
+
+    /** The next page, unless one is coming or the last one came. */
+    suspend fun more() {
+        if (catalogLoading || catalogEnd || page == 0) return
+        loadPage()
+    }
+
+    private suspend fun loadPage() {
+        val q = query
+        val gen = generation
+        val next = page + 1
+        if (q.filter == null) { faces = emptyList(); catalogEnd = true; return }
+        catalogLoading = true
+        try {
+            val (items, body) = try {
+                Catalog.page(q, next, hasLikesCount != false, account.token)
+            } catch (e: ServerError) {
+                // a server without likes_count refuses that sort: Popular asks again by downloads
+                if (e.status != 400 || q.sort != CatalogSort.Popular || hasLikesCount == false) throw e
+                hasLikesCount = false
+                Catalog.page(q, next, false, account.token)
+            }
+            if (gen != generation) return
+            items.firstOrNull()?.let { hasLikesCount = it.likesCount != null }
+            if (next == 1) q.cacheName?.let { store(it, body) }
+            faces = if (next == 1) items else faces + items.filter { f -> faces.none { it.id == f.id } }
+            page = next
+            catalogEnd = items.size < CatalogQuery.PER_PAGE
+            catalogError = null
+            items.forEach(::remember)
+            if (hasLikesCount == false) runCatching { Catalog.countLikes(items) }.onSuccess { counts = counts + it }
+        } catch (e: Exception) {
+            if (gen == generation && e !is kotlinx.coroutines.CancellationException) catalogError = e.message ?: "Couldn't load watch faces"
+        } finally {
+            if (gen == generation) catalogLoading = false
+        }
+    }
+
+    private fun remember(face: Watchface) {
+        known[face.id] = face
+        face.likesCount?.let { counts = counts + (face.id to it) }
+        dials = dials + (dialId(face.id) to DialFace(face.id, face.collectionId, face.name, face.preview))
+    }
+
+    /** The signed-in user's own likes, for the hearts; nothing signed out. */
+    suspend fun loadMyLikes() {
+        val u = user ?: run { myLikes = emptyMap(); return }
+        runCatching { Catalog.myLikes(u.id, account.token) }.onSuccess { myLikes = it }
+    }
+
+    /** Likes or unlikes as the signed-in user; the count moves at once and back if the server says no. */
     suspend fun toggleLike(face: Watchface) {
         val u = user ?: return
-        val mine = likes.firstOrNull { it.watchface == face.id && it.user == u.id }
-        likes = if (mine != null) likes - mine else likes + Catalog.Like("", u.id, face.id)
-        runCatching { if (mine != null) Catalog.unlike(mine.id, account.token) else Catalog.like(u.id, face.id, account.token) }
-        loadLikes()
+        val mine = myLikes[face.id]
+        val count = likeCount(face)
+        if (mine == "") return // its create is still in flight
+        if (mine != null) {
+            myLikes = myLikes - face.id
+            counts = counts + (face.id to maxOf(0, count - 1))
+        } else {
+            myLikes = myLikes + (face.id to "")
+            counts = counts + (face.id to count + 1)
+        }
+        runCatching {
+            if (mine != null) Catalog.unlike(mine, account.token)
+            else myLikes = myLikes + (face.id to Catalog.like(u.id, face.id, account.token))
+        }.onFailure {
+            myLikes = if (mine != null) myLikes + (face.id to mine) else myLikes - face.id
+            counts = counts + (face.id to count)
+        }
+    }
+
+    /** An author's published faces, all of them. */
+    suspend fun author(id: String): List<Watchface> {
+        val faces = Catalog.author(id, account.token)
+        faces.forEach(::remember)
+        if (faces.firstOrNull()?.likesCount == null) runCatching { Catalog.countLikes(faces) }.onSuccess { counts = counts + it }
+        return faces
+    }
+
+    /**
+     * Names and pictures for the dials on the watch. Only when one isn't known yet: then the slim index of every face
+     * the user may see, from disk, and from the server again if a dial is still unknown and the copy is over ten
+     * minutes old (a face installed from the site since).
+     */
+    suspend fun resolveDials(ids: List<Long>) {
+        val missing = { ids.filter { it !in dials && it !in stockDials(getApplication()) } }
+        if (missing().isEmpty()) return
+        val file = java.io.File(cacheDir, "dial-index.json")
+        runCatching { org.json.JSONArray(file.readText()) }.getOrNull()?.let { a ->
+            dials = dials + (0 until a.length()).map { DialFace.from(a.getJSONObject(it)) }.associateBy { dialId(it.id) }
+            if (missing().isEmpty() || System.currentTimeMillis() - file.lastModified() < 600_000) return
+        }
+        val index = runCatching { Catalog.dialIndex(account.token) }.getOrNull() ?: return
+        dials = dials + index.associateBy { dialId(it.id) }
+        store("dial-index", org.json.JSONArray(index.map { it.json() }).toString())
+    }
+
+    private fun cached(name: String) = runCatching { java.io.File(cacheDir, "$name.json").readText() }.getOrNull()
+
+    private fun store(name: String, body: String) {
+        runCatching {
+            cacheDir.mkdirs()
+            val tmp = java.io.File(cacheDir, "$name.json.tmp")
+            tmp.writeText(body)
+            tmp.renameTo(java.io.File(cacheDir, "$name.json"))
+        }
     }
     var phase by mutableStateOf<Phase>(Phase.Idle)
         private set
@@ -94,18 +234,13 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         if (phase is Phase.Checked) Analytics.track("watch_connected", mapOf("firmware" to if (loader == null) "stock" else "patched"))
     }
 
-    suspend fun reload() {
-        try {
-            account.user?.let { mine = Catalog.mine(it.id, account.token) }
-            all = Catalog.all()
-            catalogError = null
-            loadLikes()
-        } catch (e: Exception) {
-            catalogError = e.message ?: "Couldn't load watch faces"
-        }
-    }
+    suspend fun reload() = loadMyLikes()
 
-    suspend fun face(id: String) = (all + mine).firstOrNull { it.id == id } ?: Catalog.face(id, account.token)
+    /** A face from a list loaded, else from the server: a deep link can name one before any list. */
+    suspend fun face(id: String): Watchface = known[id] ?: Catalog.face(id, account.token).also {
+        remember(it)
+        if (it.likesCount == null) runCatching { Catalog.countLikes(listOf(it)) }.onSuccess { n -> counts = counts + n }
+    }
 
     suspend fun loadProviders() {
         providers = account.providers()
@@ -129,7 +264,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     fun signOut() {
         account.signOut()
         user = null
-        mine = emptyList()
+        myLikes = emptyMap()
     }
 
     suspend fun deleteAccount() {

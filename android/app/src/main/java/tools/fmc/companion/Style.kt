@@ -36,10 +36,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.Image
 
 // Design tokens and components, after ios/App/Style.swift: workout-companion is the base (
@@ -122,8 +125,10 @@ fun SecondaryButton(text: String, enabled: Boolean = true, onClick: () -> Unit) 
     FilledTonalButton(onClick, Modifier.fillMaxWidth(), enabled = enabled, contentPadding = capsule,
         colors = ButtonDefaults.filledTonalButtonColors()) { Text(text, fontWeight = FontWeight.Medium, fontSize = 17.sp) }
 
-// ponytail: an in-memory cache of decoded previews; a disk cache if scrolling the whole catalog refetches too much.
-private val images = LruCache<String, ImageBitmap>(80)
+// decoded pictures in memory, by their size in bytes; the files themselves on disk (ImageCache)
+private val images = object : LruCache<String, ImageBitmap>(32 shl 20) {
+    override fun sizeOf(key: String, value: ImageBitmap) = value.width * value.height * 4
+}
 
 /** The watch's 466×466 round panel. */
 @Composable
@@ -134,16 +139,19 @@ fun FacePreview(url: String?, modifier: Modifier = Modifier) {
     }
 }
 
-/** A picture from the web, decoded once per launch; null while loading, on failure or for a format Android can't decode. */
+/** A picture from the web, from disk after the first time; null while loading, on failure or for a format Android can't decode. */
 @Composable
 fun rememberImage(url: String?): ImageBitmap? {
     // keyed by url: the same call site showing another picture starts over
     var bitmap by remember(url) { mutableStateOf(url?.let(images::get)) }
+    val context = LocalContext.current
     LaunchedEffect(url) {
         if (bitmap == null && url != null) {
+            ImageCache.init(context.cacheDir)
             bitmap = runCatching {
-                val raw = download(url)
-                BitmapFactory.decodeByteArray(raw, 0, raw.size).asImageBitmap().also { images.put(url, it) }
+                val raw = ImageCache.bytes(url)
+                withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(raw, 0, raw.size).asImageBitmap() }
+                    .also { images.put(url, it) }
             }.getOrNull()
         }
     }

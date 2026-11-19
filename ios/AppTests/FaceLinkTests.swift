@@ -30,7 +30,7 @@ struct FaceLinkTests {
     @Test func decodesARecord() throws {
         let json = """
         {"id":"ql801euz9rzjkk6","collectionId":"pbc_984338259","name":"[CMF] 8-Bit","description":"",
-         "preview":"preview_s60dq7bcph.png","bin":"cmf_8_bit_ecmsj3q1z9.bin","published":true,"downloads":2,
+         "preview":"preview_s60dq7bcph.png","bin":"cmf_8_bit_ecmsj3q1z9.bin","published":true,"downloads":2,"created":"",
          "device":"watch_pro_2","expand":{"owner":{"id":"mrwcguo74bjb4gt","name":"Yakashi"}}}
         """
         let face = try JSONDecoder().decode(Watchface.self, from: Data(json.utf8))

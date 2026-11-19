@@ -36,9 +36,7 @@ struct DialSlot: Identifiable {
     var savedPreview: URL? { UserDefaults.standard.url(forKey: "dial-preview-\(id)") }
 
     /// An FMC catalog face, from this app or from fmc.tools: its dial id is `dialId(record id)`.
-    @MainActor func face(in catalog: Catalog) -> Watchface? {
-        (catalog.mine + catalog.all).first { dialId($0.id) == id }
-    }
+    @MainActor func face(in catalog: Catalog) -> DialFace? { catalog.dials[id] }
 
     /// fmc_frontend modules/device/lib/stock-dials.json: id → name of the factory and Nothing gallery faces.
     static let stock: [UInt32: String] = {

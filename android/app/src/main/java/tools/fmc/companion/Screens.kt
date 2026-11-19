@@ -104,6 +104,9 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -239,18 +242,21 @@ fun CatalogScreen(model: AppModel, open: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val signedIn = model.user != null
     val showMine = signedIn && shelf == 2
-    var list = if (showMine) model.mine else model.all
-    if (signedIn && shelf == 1) list = list.filter(model::liked)
     val q = query.trim()
-    if (q.isNotEmpty()) list = list.filter {
-        it.name.contains(q, ignoreCase = true) || (it.author ?: "").contains(q, ignoreCase = true)
+    val wanted = CatalogQuery(if (signedIn) Shelf.entries[shelf] else Shelf.All, CatalogSort.entries[sort], q, model.user?.id)
+    LaunchedEffect(wanted) {
+        // typing: the server is asked once the user pauses, not per letter
+        if (wanted.search != model.query.search) delay(350)
+        model.show(wanted)
     }
-    val counts = remember(model.likes) { model.likes.groupingBy { it.watchface }.eachCount() }
-    val shown = when (sort) {
-        1 -> list.sortedByDescending { counts[it.id] ?: 0 }
-        2 -> list.sortedByDescending { it.downloads }
-        else -> list.sortedByDescending { it.created }
-    }
+    val shown = model.faces
+    val grid = rememberLazyGridState()
+    // the next page when the last cells come into view
+    val nearEnd by remember { derivedStateOf {
+        val last = grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+        CatalogQuery.nearEnd(last - 1, model.faces.size) // item 0 is the header
+    } }
+    LaunchedEffect(nearEnd, shown.size) { if (nearEnd) model.more() }
     Column {
         Bar(if (showMine) "My watch faces" else if (signedIn && shelf == 1) "Liked" else "Watch faces") {
             Box {
@@ -263,8 +269,8 @@ fun CatalogScreen(model: AppModel, open: (String) -> Unit) {
                 }
             }
         }
-        PullToRefreshBox(refreshing, { scope.launch { refreshing = true; model.reload(); refreshing = false } }) {
-            LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(),
+        PullToRefreshBox(refreshing, { scope.launch { refreshing = true; model.refresh(); refreshing = false } }) {
+            LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), state = grid,
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
@@ -285,6 +291,7 @@ fun CatalogScreen(model: AppModel, open: (String) -> Unit) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         val empty = when {
                             model.catalogError != null -> "Couldn't load watch faces\n${model.catalogError}"
+                            model.catalogLoading -> "Loading…"
                             q.isNotEmpty() -> "Nothing found"
                             showMine -> "No watch faces yet"
                             signedIn && shelf == 1 -> "No liked watch faces"
@@ -294,6 +301,9 @@ fun CatalogScreen(model: AppModel, open: (String) -> Unit) {
                     }
                 }
                 items(shown, key = { it.id }) { face -> FaceCard(model, face) { open(face.id) } }
+                if (model.catalogLoading && !model.catalogEnd && shown.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+                    Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                }
             }
         }
     }
@@ -304,7 +314,7 @@ fun CatalogScreen(model: AppModel, open: (String) -> Unit) {
 fun FaceCard(model: AppModel, face: Watchface, open: () -> Unit) =
     Surface(Modifier.clickable(onClick = open), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            FacePreview(face.previewURL, Modifier.fillMaxWidth().padding(bottom = 2.dp))
+            FacePreview(face.thumbURL, Modifier.fillMaxWidth().padding(bottom = 2.dp))
             Text(face.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (!face.published) Text("Draft", style = MaterialTheme.typography.bodySmall, color = Fmc.secondary)
             else face.author?.let { author ->
@@ -327,7 +337,8 @@ fun FaceCard(model: AppModel, face: Watchface, open: () -> Unit) =
 @Composable
 fun AuthorScreen(model: AppModel, id: String, open: (String) -> Unit, back: () -> Unit) {
     val context = LocalContext.current
-    val faces = model.all.filter { it.ownerId == id }.sortedByDescending { it.created }
+    var faces by remember(id) { mutableStateOf<List<Watchface>>(emptyList()) }
+    LaunchedEffect(id) { runCatching { model.author(id) }.onSuccess { faces = it } }
     val first = faces.firstOrNull()
     Column {
         Bar(first?.author ?: "", back) {
@@ -387,8 +398,7 @@ fun compact(n: Int): String = when {
 /** A face's round picture: its preview, else the black panel with its number. */
 @Composable
 fun DialPicture(model: AppModel, slot: DialSlot, modifier: Modifier = Modifier) {
-    val face = (model.mine + model.all).firstOrNull { dialId(it.id) == slot.id }
-    val url = face?.previewURL ?: slot.preview
+    val url = model.dials[slot.id]?.thumbURL ?: slot.preview
     if (url != null) FacePreview(url, modifier)
     else Box(modifier.aspectRatio(1f).clip(CircleShape).background(Color.Black), contentAlignment = Alignment.Center) {
         // no picture anywhere for stock and Nothing X faces: the watch's place for it
@@ -414,7 +424,7 @@ fun WatchFrame(side: Dp, modifier: Modifier = Modifier, content: @Composable () 
 
 @Composable
 fun DialTile(model: AppModel, slot: DialSlot, modifier: Modifier = Modifier, active: Boolean = false) {
-    val face = (model.mine + model.all).firstOrNull { dialId(it.id) == slot.id }
+    val face = model.dials[slot.id]
     Column(modifier.width(88.dp), horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp)) {
         val ring = if (active) Modifier.border(2.5.dp, Color(0xFFFFC700), CircleShape) else Modifier
@@ -452,7 +462,7 @@ fun FaceScreen(model: AppModel, id: String, author: (String) -> Unit = {}, back:
         progress = 0f
         try {
             installFaceOnWatch(context, model.store, bin, f.id, f.name, pick = { slots -> ask(slots) }, preset = preset) { p -> scope.launch { progress = p / 100f } }
-            context.getSharedPreferences("dials", 0).edit().putString("preview-${dialId(f.id)}", f.previewURL).apply()
+            context.getSharedPreferences("dials", 0).edit().putString("preview-${dialId(f.id)}", f.thumbURL).apply()
             installed = true
             Analytics.track("face_installed", mapOf("id" to f.id))
         } catch (e: CancellationException) {
@@ -684,6 +694,7 @@ fun WatchScreen(model: AppModel, nav: Nav, signIn: () -> Unit) {
                         dismissButton = { TextButton({ deleting = null }) { Text("Cancel") } })
                 }
                 val on = remember(model.facesRead) { facesOnWatch(context) }
+                LaunchedEffect(on.faces.map { it.id }) { model.resolveDials(on.faces.map { it.id }) }
                 Section(on.count?.let { "Watch faces · $it" } ?: "Watch faces") {
                     val faces = on.faces
                     // as Nothing X and fmc.tools show them: the round previews in the watch's own order. An FMC face,
