@@ -323,13 +323,14 @@ label ≤ 24 bytes, `title` ≤ 48, `artist` ≤ 32. Track names are not behind 
 ### `0x90 job.set`, `0x91 job.delete`
 
 Background refresh for a widget or page: the app registers a job, and the phone runs its request every N minutes
-while the app isn't running, then writes the records to the watch for it. The write to the watch is the SDK's
-(cmf-watch-sdk, the widget-push doc, not written yet); until it exists the phone runs the jobs and drops the records.
+while the app isn't running, then writes the result to the watch for it with the stub's `PUSH` (cmf-watch-sdk
+`docs/widget-push.md`, stub 7 and later): into the app's widget card, or into the blob the app gets as its first
+message when it starts. On a stub before 7 the phone runs the job and drops the result (DevLog says so).
 
 `job.set`: a multi-part request; joined payload (`jobs` vectors):
 
 ```
-job:u8 ‖ minutes:u16 ‖ kind:u8 ‖ spec
+job:u8 ‖ minutes:u16 ‖ kind:u8 ‖ target:u8 ‖ spec
 ```
 
 | Field | |
@@ -337,6 +338,19 @@ job:u8 ‖ minutes:u16 ‖ kind:u8 ‖ spec
 | `job` | 0–3: up to four jobs per package; a job with the same number replaces the old one |
 | `minutes` | how often; under 15 counts as 15, over 1440 as 1440 |
 | `kind` | 0 a web request: `spec` is `http.request`'s joined payload (`method ‖ url_len ‖ url ‖ body`); 1 the weather: `spec` is `weather`'s args (`days`); 2 the calendar: `spec` is `calendar.events`' args |
+| `target` | 0 the widget card (web requests only), 1 the start blob |
+
+What goes to the watch (`push-vectors.json`, made by `tools/push-vectors.py` with the SDK's own `widget_record`):
+
+- blob: the job's records, each as `len:u8 ‖ record`, whole records while they fit the blob's 128 bytes (a web
+  job: `code ‖ length` first, then as much of the body as fits); none fits: nothing is pushed. The app reads it
+  with `recv` at start, `slot` its own.
+- widget: a web job whose answer is 2xx, its body UTF-8: the first line is the card's title (≤ 23 bytes), the rest
+  its value (≤ 39 bytes, a second `\n` starts the value's second line). Anything else: nothing is pushed.
+
+One widget and one blob per app: several jobs with the same target replace each other's result. The stub takes one
+write per slot and target per 60 s; a `Later` makes the job due again after the wait it names. Same bytes as stored
+cost nothing.
 
 Anything else is `BAD_REQUEST`. The job needs the cap its request would (`http:<host>`, `weather`, `calendar`): no
 answer yet is `ASK`, denied is `DENIED`, as for the request itself. `OK`, no records. A job's records are exactly
@@ -347,6 +361,9 @@ host and "Show text on the watch" as set. A job whose cap is off later doesn't r
 
 The app's page lists its jobs ("Every 30 min: GET api.example.com/rate") with a switch each. Reset permissions and
 Delete from the Watch delete them.
+
+`PUSH` itself, from the phone (`Push.swift` / `wire/Push.kt`): `slot ‖ kind ‖ data`, reply `00` ok, `0A ‖ wait:u32`
+later, `07` no app in that slot, `01` bad request or a stub before 7, `02` NAND write failed.
 
 When they run: on Android in the foreground service's loop (`RpcService`, at least once a minute); on iOS in
 `RPCListener`'s loop, while the app is in the foreground or woken by BLE (about 10 s). iOS has no BGAppRefreshTask

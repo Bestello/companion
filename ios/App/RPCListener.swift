@@ -36,6 +36,8 @@ actor KLock {
     private var link: BLELink?
     /// slot → package name, from INFO
     private var apps: [Int: String] = [:]
+    /// The stub's release, from the same read: PUSH needs 7.
+    private var stub: UInt32 = 1
 
     func start() {
         guard task == nil else { return }
@@ -58,6 +60,7 @@ actor KLock {
     func update(_ state: LoaderState?) {
         guard let state else { return }
         apps = state.apps.mapValues(\.name)
+        stub = state.stub.version
         if task == nil { start() }
     }
 
@@ -79,6 +82,7 @@ actor KLock {
                 return true
             }
             apps = state.apps.mapValues(\.name)
+            stub = state.stub.version
             _ = try await KLock.shared.run { try await session.ping() } // registers: the stub sends us EVENTs
             _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
             DevLog.shared.log("listening")
@@ -105,7 +109,7 @@ actor KLock {
                     let records = try await withDeadline(.seconds(8)) { @MainActor in
                         try await runJob(j, package: package, host: PhoneServices.shared)
                     }
-                    await deliver(package, j, records, session)
+                    await deliver(package, j, records, session, now)
                 } catch {
                     DevLog.shared.log("\(package) job \(j.id): \(error)")
                 }
@@ -113,11 +117,23 @@ actor KLock {
         }
     }
 
-    /// Writes a job's records to the app's widget or page data on the watch while the app doesn't run.
-    /// TODO(widget-push): over K as cmf-watch-sdk's widget-push doc says (branch app-order, not written yet); until
-    /// then the records are fetched and dropped.
-    private func deliver(_ package: String, _ job: RefreshJob, _ records: [Data], _ session: KSession) async {
-        DevLog.shared.log("\(package) job \(job.id): \(records.count) records, not delivered (the watch side isn't there yet)")
+    /// Writes a job's records to the app's widget card or start blob (PUSH, stub 7, cmf-watch-sdk docs/widget-push.md).
+    private func deliver(_ package: String, _ job: RefreshJob, _ records: [Data], _ session: KSession, _ now: Date) async {
+        let line = "\(package) job \(job.id)"
+        guard let data = job.pushData(records) else { return DevLog.shared.log("\(line): nothing to push (\(records.count) records)") }
+        guard canPush(stub: stub) else { return DevLog.shared.log("\(line): stub \(stub) takes no PUSH (7+)") }
+        guard let slot = apps.first(where: { $0.value == package })?.key else { return DevLog.shared.log("\(line): not on the watch") }
+        do {
+            switch try await KLock.shared.run({ try await push(session, slot: slot, kind: job.target, data: data) }) {
+            case .ok: DevLog.shared.log("\(line): pushed to slot \(slot)")
+            case .later(let ms):
+                // due again once the watch takes a write for this slot
+                Jobs.shared.ran(package, job.id, at: now + Double(ms) / 1000 - Double(job.minutes * 60))
+            case .refused(let s): DevLog.shared.log("\(line): push refused (\(s))")
+            }
+        } catch {
+            DevLog.shared.log("\(line): push failed: \(error)")
+        }
     }
 
     private func handle(_ message: Data, slot: Int, _ session: KSession) async {

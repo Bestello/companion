@@ -93,6 +93,30 @@ class InstallTest {
         }
     }
 
+    /** push-vectors.json: tools/push-vectors.py, the widget record from the SDK's own install.widget_record. */
+    @Test fun pushMatchesSdk() {
+        val p = org.json.JSONObject(java.io.File(System.getProperty("vectors"), "push-vectors.json").readText())
+        fun objs(k: String) = p.getJSONArray(k).let { a -> (0 until a.length()).map(a::getJSONObject) }
+        fun recs(o: org.json.JSONObject) = o.getJSONArray("records").let { a -> (0 until a.length()).map { hex(a.getString(it)) } }
+        assertEquals(Cmd.PUSH, p.getInt("command"))
+        objs("widget").forEach { assertEquals(it.getString("hex"), widgetRecord(it.getString("title"), it.getString("value")).hex()) }
+        objs("payload").forEach { assertEquals(it.getString("hex"), pushPayload(it.getInt("slot"), it.getInt("kind"), hex(it.getString("data"))).hex()) }
+        objs("replies").forEach {
+            val want = when {
+                it.optBoolean("ok") -> PushResult.Ok
+                it.has("later_ms") -> PushResult.Later(it.getLong("later_ms"))
+                else -> PushResult.Refused(it.getInt("refused"))
+            }
+            assertEquals(want, parsePushReply(hex(it.getString("hex"))), it.toString())
+        }
+        objs("blob").forEach { assertEquals(if (it.isNull("blob")) null else it.getString("blob"), jobBlob(recs(it))?.hex()) }
+        objs("http_widget").forEach {
+            val want = if (it.optBoolean("none")) null else widgetRecord(it.getString("title"), it.getString("value")).hex()
+            assertEquals(want, jobWidget(recs(it))?.hex(), it.toString())
+        }
+        assertEquals(listOf(false, true), listOf(6L, 7L).map(::canPush))
+    }
+
     @Test fun bytesHelpers() {
         assertContentEquals(bytes(1, 0, 0, 0x80), buf { le32(0x8000_0001L) })
         assertEquals(0x8000_0001L, bytes(1, 0, 0, 0x80).le32(0))

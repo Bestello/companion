@@ -310,7 +310,7 @@ class RpcTest {
             val got = parseJob(hex(t.getString("payload")))
             if (t.optBoolean("bad")) assertNull(got, t.optString("note")) else {
                 val j = t.getJSONObject("job")
-                assertEquals(RefreshJob(j.getInt("id"), j.getInt("minutes"), j.getInt("kind"), hex(j.getString("spec"))), got)
+                assertEquals(RefreshJob(j.getInt("id"), j.getInt("minutes"), j.getInt("kind"), hex(j.getString("spec")), target = j.getInt("target")), got)
                 assertEquals(j.getString("cap"), got!!.cap)
             }
         }

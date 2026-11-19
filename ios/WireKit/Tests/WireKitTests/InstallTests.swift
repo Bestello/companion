@@ -115,3 +115,30 @@ private struct OrderVectors: Decodable {
         #expect(throws: (any Error).self, "\(c.note)") { try setOrder(hex(c.loader), names: c.names) }
     }
 }
+
+/// push-vectors.json: tools/push-vectors.py, the widget record from the SDK's own install.widget_record.
+private struct PushVectors: Decodable {
+    struct W: Decodable { let title: String; let value: String; let hex: String }
+    struct P: Decodable { let slot: Int; let kind: Int; let data: String; let hex: String }
+    struct R: Decodable { let hex: String; let ok: Bool?; let later_ms: UInt32?; let refused: UInt8? }
+    struct B: Decodable { let records: [String]; let blob: String? }
+    struct H: Decodable { let records: [String]; let title: String?; let value: String?; let none: Bool? }
+    let command: Int; let widget: [W]; let payload: [P]; let replies: [R]; let blob: [B]; let http_widget: [H]
+}
+
+@Test func pushMatchesSDK() throws {
+    let url = try #require(Bundle.module.url(forResource: "push-vectors", withExtension: "json"))
+    let p = try JSONDecoder().decode(PushVectors.self, from: Data(contentsOf: url))
+    #expect(p.command == Int(Cmd.push))
+    for w in p.widget { #expect(widgetRecord(title: w.title, value: w.value) == hex(w.hex), "\(w.title)") }
+    for c in p.payload { #expect(pushPayload(slot: c.slot, kind: PushKind(rawValue: c.kind)!, data: hex(c.data)) == hex(c.hex)) }
+    for r in p.replies {
+        let want: PushResult = r.ok == true ? .ok : r.later_ms.map { .later(ms: $0) } ?? .refused(r.refused!)
+        #expect(parsePushReply(hex(r.hex)) == want, "\(r.hex)")
+    }
+    for b in p.blob { #expect(jobBlob(b.records.map(hex)) == b.blob.map(hex)) }
+    for h in p.http_widget {
+        #expect(jobWidget(h.records.map(hex)) == (h.none == true ? nil : widgetRecord(title: h.title!, value: h.value!)))
+    }
+    #expect([6, 7].map { canPush(stub: $0) } == [false, true])
+}

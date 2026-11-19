@@ -8,7 +8,7 @@ public let loaderSlot = 0xFF
 public func appSlots(stub: UInt32) -> Int { stub >= 7 ? 16 : 8 }
 
 /// The stub's release from INFO on 0xFE; 1 when the reply doesn't say.
-func stubVersion(_ s: Requester) async throws -> UInt32 {
+public func stubVersion(_ s: Requester) async throws -> UInt32 {
     parseStubReply(try await s.call(Cmd.info, Data([stubSlot])))?.version ?? 1
 }
 let headerSize = 64, dataMax = 128

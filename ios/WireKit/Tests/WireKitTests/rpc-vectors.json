@@ -743,74 +743,89 @@
  ],
  "jobs": [
   {
-   "payload": "001e0000002268747470733a2f2f6170692e6578616d706c652e636f6d2f726174653f633d757364",
+   "payload": "001e000000002268747470733a2f2f6170692e6578616d706c652e636f6d2f726174653f633d757364",
    "job": {
     "id": 0,
     "minutes": 30,
     "kind": 0,
+    "target": 0,
     "spec": "002268747470733a2f2f6170692e6578616d706c652e636f6d2f726174653f633d757364",
     "cap": "http:api.example.com"
-   }
+   },
+   "note": "a web request into the widget"
   },
   {
-   "payload": "0105000103",
+   "payload": "010500010103",
    "job": {
     "id": 1,
     "minutes": 15,
     "kind": 1,
+    "target": 1,
     "spec": "03",
     "cap": "weather"
    },
-   "note": "minutes under 15 count as 15"
+   "note": "minutes under 15 count as 15; the weather into the blob"
   },
   {
-   "payload": "03d00702000205",
+   "payload": "03d0070201000205",
    "job": {
     "id": 3,
     "minutes": 1440,
     "kind": 2,
+    "target": 1,
     "spec": "000205",
     "cap": "calendar"
    },
    "note": "over a day counts as a day"
   },
   {
-   "payload": "023c0000011568747470733a2f2f6578616d706c652e636f6d2f777b2271223a317d",
+   "payload": "023c000001011568747470733a2f2f6578616d706c652e636f6d2f777b2271223a317d",
    "job": {
     "id": 2,
     "minutes": 60,
     "kind": 0,
+    "target": 1,
     "spec": "011568747470733a2f2f6578616d706c652e636f6d2f777b2271223a317d",
     "cap": "http:example.com"
    }
   },
   {
-   "payload": "041e000103",
+   "payload": "001e00010003",
+   "bad": true,
+   "note": "only a web request goes into the widget"
+  },
+  {
+   "payload": "001e000002002268747470733a2f2f6170692e6578616d706c652e636f6d2f726174653f633d757364",
+   "bad": true,
+   "note": "target 2"
+  },
+  {
+   "payload": "041e00010103",
    "bad": true,
    "note": "job 4: four per package, 0-3"
   },
   {
-   "payload": "001e0003",
+   "payload": "001e000301",
    "bad": true,
    "note": "kind 3"
   },
   {
-   "payload": "001e0001",
+   "payload": "001e000101",
    "bad": true,
    "note": "weather without days"
   },
   {
-   "payload": "001e00020001",
+   "payload": "001e0002010001",
    "bad": true,
    "note": "calendar args short"
   },
   {
-   "payload": "001e00000005687474703a",
+   "payload": "001e0000010005687474703a",
    "bad": true,
    "note": "not an https request"
   },
   {
-   "payload": "0001",
+   "payload": "000100",
    "bad": true,
    "note": "cut short"
   }

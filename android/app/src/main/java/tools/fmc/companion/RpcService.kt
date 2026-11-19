@@ -24,7 +24,14 @@ import tools.fmc.companion.wire.KSession
 import tools.fmc.companion.wire.Status
 import tools.fmc.companion.wire.WireError
 import kotlinx.coroutines.withTimeoutOrNull
+import tools.fmc.companion.wire.LOADER_SLOT
+import tools.fmc.companion.wire.PushResult
 import tools.fmc.companion.wire.RefreshJob
+import tools.fmc.companion.wire.appSlots
+import tools.fmc.companion.wire.canPush
+import tools.fmc.companion.wire.installed
+import tools.fmc.companion.wire.push
+import tools.fmc.companion.wire.stubVersion
 import tools.fmc.companion.wire.RpcError
 import tools.fmc.companion.wire.RpcStatus
 import tools.fmc.companion.wire.answer
@@ -104,8 +111,9 @@ class RpcService : Service() {
         // slot → package. ponytail: read once per session (INFO drops an install in progress, so not per request);
         // an app installed into a used slot while this runs keeps the old name until the next reconnect.
         val names = mutableMapOf<Int, String>()
+        val push = PushTarget()
         while (true) {
-            runDueJobs(s, phone)
+            runDueJobs(s, phone, push)
             val (slot, m) = try {
                 s.recvFrom(60_000)
             } catch (_: WireError.Timeout) {
@@ -128,7 +136,7 @@ class RpcService : Service() {
     }
 
     /** The watch apps' background jobs that are due, while the link is up (checked at least once a minute). */
-    private suspend fun runDueJobs(s: KSession, phone: PhoneServices) {
+    private suspend fun runDueJobs(s: KSession, phone: PhoneServices, push: PushTarget) {
         val jobs = Jobs(this)
         val now = System.currentTimeMillis()
         for ((pkg, list) in jobs.all()) for (j in list.filter { it.due(now) }) {
@@ -142,17 +150,34 @@ class RpcService : Service() {
                 DevLog.log(this, "$pkg job ${j.id}: ${e.message}")
                 continue
             }
-            deliverJob(s, pkg, j, records)
+            deliverJob(s, pkg, j, records, push, now)
         }
     }
 
-    /**
-     * Writes a job's records to the app's widget or page data on the watch while the app doesn't run.
-     * TODO(widget-push): over K as cmf-watch-sdk's widget-push doc says (branch app-order, not written yet); until
-     * then the records are fetched and dropped.
-     */
-    private suspend fun deliverJob(s: KSession, pkg: String, job: RefreshJob, records: List<ByteArray>) {
-        DevLog.log(this, "$pkg job ${job.id}: ${records.size} records, not delivered (the watch side isn't there yet)")
+    /** The stub's version and the apps' slots, read once per session for PUSH. */
+    private class PushTarget {
+        var stub: Long? = null
+        var slots: Map<String, Int>? = null
+    }
+
+    /** Writes a job's records to the app's widget card or start blob (PUSH, stub 7, cmf-watch-sdk docs/widget-push.md). */
+    private suspend fun deliverJob(s: KSession, pkg: String, job: RefreshJob, records: List<ByteArray>, t: PushTarget, now: Long) {
+        val line = "$pkg job ${job.id}"
+        val data = job.pushData(records) ?: return DevLog.log(this, "$line: nothing to push (${records.size} records)")
+        val stub = t.stub ?: stubVersion(s).also { t.stub = it }
+        if (!canPush(stub)) return DevLog.log(this, "$line: stub $stub takes no PUSH (7+)")
+        val slots = t.slots ?: installed(s, appSlots(stub)).filterKeys { it != LOADER_SLOT }.entries
+            .associate { it.value.name to it.key }.also { t.slots = it }
+        val slot = slots[pkg] ?: return DevLog.log(this, "$line: not on the watch")
+        when (val r = push(s, slot, job.target, data)) {
+            PushResult.Ok -> DevLog.log(this, "$line: pushed to slot $slot")
+            // due again once the watch takes a write for this slot
+            is PushResult.Later -> Jobs(this).ran(pkg, job.id, now + r.ms - job.minutes * 60_000L)
+            is PushResult.Refused -> {
+                if (r.status == Status.NO_APP.code) t.slots = null // moved or removed: read the slots again next time
+                DevLog.log(this, "$line: push refused (${r.status})")
+            }
+        }
     }
 
     private suspend fun packageIn(s: KSession, slot: Int): String? {

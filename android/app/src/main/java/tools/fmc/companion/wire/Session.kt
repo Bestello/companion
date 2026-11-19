@@ -33,6 +33,7 @@ object Cmd {
     const val DELETE = 0x90A4
     const val MSG = 0x90A5
     const val PING = 0x90A7
+    const val PUSH = 0x90A8
     const val EVENT = 0xB0A6
 }
 

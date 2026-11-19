@@ -525,11 +525,18 @@ public enum JobKind: Int, Codable, Sendable { case http = 0, weather, calendar }
 /// page while it doesn't run.
 public struct RefreshJob: Codable, Equatable, Sendable {
     public var id: Int, minutes: Int, kind: JobKind, spec: Data
+    /// Where its records go on the watch.
+    public var target: PushKind
     /// The user's switch on the app's page.
     public var on = true
     public var last: Date?
 
-    public init(id: Int, minutes: Int, kind: JobKind, spec: Data) { (self.id, self.minutes, self.kind, self.spec) = (id, minutes, kind, spec) }
+    public init(id: Int, minutes: Int, kind: JobKind, target: PushKind = .blob, spec: Data) {
+        (self.id, self.minutes, self.kind, self.target, self.spec) = (id, minutes, kind, target, spec)
+    }
+
+    /// What goes to the watch for these records: the widget record or the blob; nil when they don't make one.
+    public func pushData(_ records: [Data]) -> Data? { target == .widget ? jobWidget(records) : jobBlob(records) }
 
     /// The cap its request needs, as the same request from the app would.
     public var cap: String {
@@ -543,18 +550,21 @@ public struct RefreshJob: Codable, Equatable, Sendable {
     public func due(_ now: Date) -> Bool { on && last.map { now.timeIntervalSince($0) >= Double(minutes * 60) } ?? on }
 }
 
-/// `job:u8 ‖ minutes:u16 ‖ kind:u8 ‖ spec`: job 0–3, minutes clamped to 15…1440; spec http.request's joined payload
-/// (kind 0), weather's `days` (1), calendar.events' args (2). nil for anything else.
+/// `job:u8 ‖ minutes:u16 ‖ kind:u8 ‖ target:u8 ‖ spec`: job 0–3, minutes clamped to 15…1440; spec http.request's
+/// joined payload (kind 0), weather's `days` (1), calendar.events' args (2); target 0 the widget (web requests
+/// only), 1 the start blob. nil for anything else.
 public func parseJob(_ d: Data) -> RefreshJob? {
     let b = [UInt8](d)
-    guard b.count >= 4, b[0] < 4, let kind = JobKind(rawValue: Int(b[3])) else { return nil }
-    let spec = Data(b[4...])
+    guard b.count >= 5, b[0] < 4, let kind = JobKind(rawValue: Int(b[3])), let target = PushKind(rawValue: Int(b[4])),
+          target == .blob || kind == .http else { return nil }
+    let spec = Data(b[5...])
     switch kind {
     case .http: guard parseHTTPCall(spec) != nil else { return nil }
     case .weather: guard spec.count == 1 else { return nil }
     case .calendar: guard spec.count == 3 else { return nil }
     }
-    return RefreshJob(id: Int(b[0]), minutes: min(max(Int(d.le(UInt16.self, at: 1)), 15), 1440), kind: kind, spec: spec)
+    return RefreshJob(id: Int(b[0]), minutes: min(max(Int(d.le(UInt16.self, at: 1)), 15), 1440), kind: kind, target: target,
+                      spec: spec)
 }
 
 /// A due job's records, as its request would answer them; DENIED once its cap is off. Never asks.

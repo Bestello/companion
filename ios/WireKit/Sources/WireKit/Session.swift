@@ -21,6 +21,7 @@ public protocol Link: AnyObject, Sendable {
 enum Cmd {
     static let info: UInt16 = 0x90A0, begin: UInt16 = 0x90A1, data: UInt16 = 0x90A2, end: UInt16 = 0x90A3
     static let delete: UInt16 = 0x90A4, msg: UInt16 = 0x90A5, ping: UInt16 = 0x90A7, event: UInt16 = 0xB0A6
+    static let push: UInt16 = 0x90A8
 }
 
 public enum Status: UInt8 {

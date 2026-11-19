@@ -195,7 +195,7 @@ class Jobs(context: Context) {
         val a = JSONArray(prefs.getString(pkg, "[]"))
         (0 until a.length()).map(a::getJSONObject).map {
             RefreshJob(it.getInt("id"), it.getInt("minutes"), it.getInt("kind"), tools.fmc.companion.wire.hex(it.getString("spec")),
-                it.optBoolean("on", true), if (it.has("last")) it.getLong("last") else null)
+                it.optBoolean("on", true), if (it.has("last")) it.getLong("last") else null, it.optInt("target", 1))
         }
     }.getOrDefault(emptyList())
 
@@ -204,7 +204,7 @@ class Jobs(context: Context) {
     private fun put(pkg: String, list: List<RefreshJob>) = prefs.edit().apply {
         if (list.isEmpty()) remove(pkg) else putString(pkg, JSONArray(list.map { j ->
             org.json.JSONObject().put("id", j.id).put("minutes", j.minutes).put("kind", j.kind).put("spec", j.spec.joinToString("") { "%02x".format(it) })
-                .put("on", j.on).apply { j.last?.let { put("last", it) } }
+                .put("on", j.on).put("target", j.target).apply { j.last?.let { put("last", it) } }
         }).toString())
     }.apply()
 
@@ -228,5 +228,6 @@ fun jobLabel(j: RefreshJob): String {
         tools.fmc.companion.wire.JobKind.WEATHER -> "Weather"
         else -> "Calendar"
     }
-    return "Every ${if (j.minutes % 60 == 0) "${j.minutes / 60} h" else "${j.minutes} min"}: $what"
+    val into = if (j.target == tools.fmc.companion.wire.PushKind.WIDGET) " → widget" else ""
+    return "Every ${if (j.minutes % 60 == 0) "${j.minutes / 60} h" else "${j.minutes} min"}: $what$into"
 }

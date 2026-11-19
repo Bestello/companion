@@ -55,8 +55,8 @@ wire). The version is INFO on slot `0xFE`; `readLoader`, `installed` and `instal
   `noBackupFilesDir/storage`; `KeyValueStore` in WireKit and the wire. Delete from the Watch clears it, Reset
   permissions doesn't (it is the app's data, not an answer of the user's).
 - Background jobs (0x90): `Jobs` (UserDefaults "rpc-jobs" / prefs "jobs"), run by `RPCListener` / `RpcService` while
-  the link is up. Reset permissions and Delete from the Watch clear them. Delivering to the watch is a TODO
-  (`deliver` / `deliverJob`) until cmf-watch-sdk has its widget-push doc.
+  the link is up, delivered with the stub's `PUSH` (stub 7+, cmf-watch-sdk `docs/widget-push.md`) into the app's
+  widget card or start blob. Reset permissions and Delete from the Watch clear them.
 
 What one platform can't do answers `UNAVAILABLE` there and stays out of `caps`: notifications, media on iOS,
 reminders on Android. Details per method in [miniapp-rpc.md](miniapp-rpc.md).

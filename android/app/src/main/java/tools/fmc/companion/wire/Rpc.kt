@@ -373,8 +373,14 @@ object JobKind {
 }
 
 /** A watch app's background refresh (job.set): every [minutes], the records of one request, for the app's widget or
- *  page while it doesn't run. [on] is the user's switch; [last] ms. */
-data class RefreshJob(val id: Int, val minutes: Int, val kind: Int, val spec: ByteArray, val on: Boolean = true, val last: Long? = null) {
+ *  page while it doesn't run. [on] is the user's switch; [last] ms; [target] a [PushKind]. */
+data class RefreshJob(
+    val id: Int, val minutes: Int, val kind: Int, val spec: ByteArray, val on: Boolean = true, val last: Long? = null,
+    val target: Int = PushKind.BLOB,
+) {
+    /** What goes to the watch for these records: the widget record or the blob; null when they don't make one. */
+    fun pushData(records: List<ByteArray>) = if (target == PushKind.WIDGET) jobWidget(records) else jobBlob(records)
+
     /** The cap its request needs, as the same request from the app would. */
     val cap: String get() = when (kind) {
         JobKind.HTTP -> "http:${parseHttpCall(spec)?.host.orEmpty()}"
@@ -388,22 +394,24 @@ data class RefreshJob(val id: Int, val minutes: Int, val kind: Int, val spec: By
     fun due(now: Long) = on && (last == null || now - last >= minutes * 60_000L)
 
     override fun equals(other: Any?) = other is RefreshJob && id == other.id && minutes == other.minutes && kind == other.kind &&
-        spec.contentEquals(other.spec) && on == other.on && last == other.last
+        spec.contentEquals(other.spec) && on == other.on && last == other.last && target == other.target
     override fun hashCode() = id
 }
 
-/** `job:u8 ‖ minutes:u16 ‖ kind:u8 ‖ spec`: job 0-3, minutes clamped to 15..1440; spec http.request's joined payload
- *  (kind 0), weather's `days` (1), calendar.events' args (2). null for anything else. */
+/** `job:u8 ‖ minutes:u16 ‖ kind:u8 ‖ target:u8 ‖ spec`: job 0-3, minutes clamped to 15..1440; spec http.request's
+ *  joined payload (kind 0), weather's `days` (1), calendar.events' args (2); target 0 the widget (web requests only),
+ *  1 the start blob. null for anything else. */
 fun parseJob(d: ByteArray): RefreshJob? {
-    if (d.size < 4 || d.u8(0) > 3 || d.u8(3) > JobKind.CALENDAR) return null
-    val spec = d.copyOfRange(4, d.size)
+    if (d.size < 5 || d.u8(0) > 3 || d.u8(3) > JobKind.CALENDAR || d.u8(4) > PushKind.BLOB) return null
+    if (d.u8(4) == PushKind.WIDGET && d.u8(3) != JobKind.HTTP) return null
+    val spec = d.copyOfRange(5, d.size)
     val ok = when (d.u8(3)) {
         JobKind.HTTP -> parseHttpCall(spec) != null
         JobKind.WEATHER -> spec.size == 1
         else -> spec.size == 3
     }
     if (!ok) return null
-    return RefreshJob(d.u8(0), d.le16(1).coerceIn(15, 1440), d.u8(3), spec)
+    return RefreshJob(d.u8(0), d.le16(1).coerceIn(15, 1440), d.u8(3), spec, target = d.u8(4))
 }
 
 /** A due job's records, as its request would answer them; DENIED once its cap is off. Never asks. */

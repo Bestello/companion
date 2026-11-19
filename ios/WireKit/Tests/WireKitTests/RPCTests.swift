@@ -77,7 +77,7 @@ struct RPCVectors: Decodable {
     }
     let media: [Media]
     struct Job: Decodable {
-        struct J: Decodable { let id: Int; let minutes: Int; let kind: Int; let spec: String; let cap: String }
+        struct J: Decodable { let id: Int; let minutes: Int; let kind: Int; let target: Int; let spec: String; let cap: String }
         let payload: String; let job: J?; let bad: Bool?; let note: String?
     }
     let jobs: [Job]
@@ -467,7 +467,8 @@ let storageIDs = Data(RPCMethod.free)
         let got = parseJob(hex(c.payload))
         if c.bad == true { #expect(got == nil, "\(c.note ?? c.payload)") } else {
             let j = c.job!
-            #expect(got == RefreshJob(id: j.id, minutes: j.minutes, kind: JobKind(rawValue: j.kind)!, spec: hex(j.spec)), "\(c.payload)")
+            #expect(got == RefreshJob(id: j.id, minutes: j.minutes, kind: JobKind(rawValue: j.kind)!,
+                                      target: PushKind(rawValue: j.target)!, spec: hex(j.spec)), "\(c.payload)")
             #expect(got?.cap == j.cap)
         }
     }

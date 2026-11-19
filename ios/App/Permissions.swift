@@ -162,7 +162,8 @@ import WireKit
         case .weather: String(localized: "Weather")
         case .calendar: String(localized: "Calendar")
         }
+        let into = j.target == .widget ? String(localized: " → widget") : ""
         let every = j.minutes % 60 == 0 ? String(localized: "\(j.minutes / 60) h") : String(localized: "\(j.minutes) min")
-        return String(localized: "Every \(every): \(what)")
+        return String(localized: "Every \(every): \(what)\(into)")
     }
 }
