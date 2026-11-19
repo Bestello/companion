@@ -9,13 +9,14 @@ struct CatalogView: View {
     @Environment(Catalog.self) private var catalog
     @Binding var path: [String]
     @State private var shelf: Shelf = CommandLine.arguments.contains("-mine") ? .mine : .all
-    @State private var query = ""
-    @AppStorage("catalog-sort") private var sort: Sort = .new
+    @State private var search = ""
+    @AppStorage("catalog-sort") private var sort: CatalogSort = .new
 
-    enum Shelf: Hashable { case all, liked, mine }
-    /// fmc_frontend market.svelte SORT_OPTIONS (Top creators, a shelf of rails, left out)
-    enum Sort: String, CaseIterable { case new, popular, downloads }
     private var mine: Bool { shelf == .mine }
+    /// What the grid shows, as the server is asked for it.
+    private var query: CatalogQuery {
+        CatalogQuery(shelf: account.user == nil ? .all : shelf, sort: sort, search: search, user: account.user?.id)
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -37,18 +38,24 @@ struct CatalogView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Picker("Sort", selection: $sort) {
-                            Text("Newest").tag(Sort.new)
-                            Text("Popular").tag(Sort.popular)
-                            Text("Most downloaded").tag(Sort.downloads)
+                            Text("Newest").tag(CatalogSort.new)
+                            Text("Popular").tag(CatalogSort.popular)
+                            Text("Most downloaded").tag(CatalogSort.downloads)
                         }
                     } label: {
                         Label("Sort", systemImage: "arrow.up.arrow.down")
                     }
                 }
             }
-            .searchable(text: $query, prompt: "Name or author")
-            .refreshable { await reload() }
-            .task(id: account.user?.id) { await reload() }
+            .searchable(text: $search, prompt: "Name or author")
+            .refreshable { await catalog.refresh(account: account) }
+            .task(id: account.user?.id) { await catalog.loadMyLikes(account) }
+            .task(id: query) {
+                // typing: the server is asked once the user pauses, not per letter
+                if query.search != catalog.query.search { try? await Task.sleep(for: .milliseconds(350)) }
+                guard !Task.isCancelled else { return }
+                await catalog.show(query, account: account)
+            }
             // ponytail: one String path for both pages, "user:<id>" for an author; a typed route if more come
             .navigationDestination(for: String.self) { v in
                 if v.hasPrefix("user:") { AuthorView(id: String(v.dropFirst(5))) } else { FaceDetail(id: v) }
@@ -57,7 +64,7 @@ struct CatalogView: View {
     }
 
     @ViewBuilder private var grid: some View {
-        let faces = shown
+        let faces = catalog.faces
         if faces.isEmpty {
             ContentUnavailableView {
                 Label(empty, systemImage: "square.grid.2x2")
@@ -67,44 +74,26 @@ struct CatalogView: View {
             .padding(.top, 80)
         } else {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
-                ForEach(faces) { face in
+                ForEach(Array(faces.enumerated()), id: \.element.id) { i, face in
                     NavigationLink(value: face.id) { FaceCell(face: face) }
                         .buttonStyle(.plain)
+                        .onAppear {
+                            if CatalogQuery.nearEnd(i, of: faces.count) { Task { await catalog.more(account: account) } }
+                        }
                 }
             }
             .padding()
-        }
-    }
-
-    private var shown: [Watchface] {
-        var list = mine ? catalog.mine : catalog.all
-        if shelf == .liked { list = list.filter { catalog.liked($0, by: account.user) } }
-        let q = query.trimmingCharacters(in: .whitespaces)
-        if !q.isEmpty {
-            list = list.filter { $0.name.localizedStandardContains(q) || ($0.author ?? "").localizedStandardContains(q) }
-        }
-        switch sort {
-        case .new: return list.sorted { $0.created > $1.created }
-        case .popular:
-            let counts = Dictionary(catalog.likes.map { ($0.watchface, 1) }, uniquingKeysWith: +)
-            return list.sorted { counts[$0.id, default: 0] > counts[$1.id, default: 0] }
-        case .downloads: return list.sorted { $0.downloads > $1.downloads }
+            if catalog.loading && !catalog.end { ProgressView().padding(.bottom) }
         }
     }
 
     private var empty: LocalizedStringKey {
         if catalog.error != nil { "Couldn't load watch faces" }
-        else if !query.isEmpty { "Nothing found" }
+        else if catalog.loading { "Loading…" }
+        else if !search.isEmpty { "Nothing found" }
         else if mine { "No watch faces yet" }
         else if shelf == .liked { "No liked watch faces" }
         else { "Loading…" }
-    }
-
-    private func reload() async {
-        if account.user != nil { await catalog.loadMine(account) }
-        async let likes: Void = catalog.loadLikes()
-        await catalog.load()
-        await likes
     }
 }
 
@@ -116,7 +105,7 @@ struct FaceCell: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            FacePreview(url: face.previewURL).padding(.bottom, 2)
+            FacePreview(url: face.thumbURL).padding(.bottom, 2)
             Text(face.name).font(.subheadline.weight(.semibold)).lineLimit(1)
             if !face.published {
                 Text("Draft").font(.caption).foregroundStyle(.secondary)
@@ -147,10 +136,11 @@ struct FaceCell: View {
 /// A creator's page, as fmc.tools /user/<id>: avatar, name, totals, then their published faces.
 struct AuthorView: View {
     @Environment(Catalog.self) private var catalog
+    @Environment(Account.self) private var account
     let id: String
+    @State private var faces: [Watchface] = []
 
     var body: some View {
-        let faces = catalog.all.filter { $0.ownerId == id }.sorted { $0.created > $1.created }
         let owner = faces.first?.expand?.owner
         ScrollView {
             VStack(spacing: 8) {
@@ -175,7 +165,7 @@ struct AuthorView: View {
                 Link(destination: Account.base.appending(path: "user/\(id)")) { Label("Open on fmc.tools", systemImage: "safari") }
             }
         }
-        .task { if catalog.all.isEmpty { await catalog.load() } }
+        .task { if let f = try? await catalog.author(id, account: account) { faces = f } }
     }
 }
 
@@ -186,7 +176,7 @@ struct LikeButton: View {
     let face: Watchface
 
     var body: some View {
-        let liked = catalog.liked(face, by: account.user)
+        let liked = catalog.liked(face)
         Button {
             Task { await catalog.toggleLike(face, account: account) }
         } label: {
@@ -225,8 +215,8 @@ struct FacePreview: View {
     let url: URL?
 
     var body: some View {
-        // ponytail: AsyncImage with URLSession's default cache; a disk cache of our own if scrolling
-        // the whole catalog refetches too much.
+        // URLCache.shared, sized at launch (FMCCompanionApp): the files say max-age 30 days, so a picture seen once
+        // comes from disk after that
         AsyncImage(url: url) { image in
             image.resizable().scaledToFit()
         } placeholder: {
@@ -367,7 +357,6 @@ struct FaceDetail: View {
         }
         .task(id: id) {
             do { face = try await catalog.face(id, account: account) } catch { self.error = error.localizedDescription }
-            if catalog.likes.isEmpty { await catalog.loadLikes() }
         }
     }
 
@@ -433,7 +422,7 @@ struct FaceDetail: View {
             try await FaceInstall.install(bin, seed: face.id, name: face.name, slot: preset, pick: { await pick($0) }) { p in
                 Task { @MainActor in progress = Double(p) / 100 }
             }
-            UserDefaults.standard.set(face.previewURL, forKey: "dial-preview-\(dialId(face.id))")
+            UserDefaults.standard.set(face.thumbURL, forKey: "dial-preview-\(dialId(face.id))")
             installed = true
             Analytics.track("face_installed", ["id": face.id])
         } catch is CancellationError {
