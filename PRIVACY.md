@@ -22,6 +22,8 @@ It counts anonymous usage events (see below).
   host sets are kept in memory per app and host. Reset permissions or deleting the app forgets both.
 - **Calendar.** When you allow a watch app to use your calendars, upcoming events are read on the phone and sent to
   the watch over Bluetooth. They are not sent anywhere else.
+- **Reminders (iPhone).** When you allow a watch app to use your reminders, the incomplete ones are read on the
+  phone and sent to the watch, titles only if you turn on "Show text on the watch". The app can mark one done.
 - **Notifications (Android).** When you allow a watch app to use notifications, their text is sent only to the watch.
 
 ## What leaves the phone

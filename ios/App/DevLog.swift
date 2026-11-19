@@ -38,7 +38,7 @@ import UIKit
 
     var fileURL: URL { Self.file }
 
-    static let methods: [UInt8: String] = [0x01: "caps", 0x10: "calendar.events", 0x20: "location", 0x30: "weather",
+    static let methods: [UInt8: String] = [0x01: "caps", 0x10: "calendar.events", 0x11: "reminders", 0x12: "reminders.complete", 0x20: "location", 0x30: "weather",
                                            0x40: "http.get", 0x41: "http.request", 0x60: "storage.get", 0x61: "storage.put", 0x62: "storage.delete", 0x70: "phone.battery", 0x51: "notify", 0x50: "notifications"]
     static let statuses = ["OK", "BAD_REQUEST", "DENIED", "UNAVAILABLE", "ASK", "TOO_LARGE"]
 }

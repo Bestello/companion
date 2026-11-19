@@ -62,6 +62,15 @@ struct RPCVectors: Decodable {
         let args: String; let alert: A?; let bad: Bool?
     }
     let notify: [Notify]
+    struct Reminders: Decodable {
+        struct ID: Decodable { let id: String; let short: UInt32 }
+        struct In: Decodable { let id: String; let day: Int?; let minute: Int?; let color: UInt16; let title: String; let show: Bool }
+        struct Rec: Decodable { let `in`: In; let hex: String }
+        struct OrderIn: Decodable { let title: String; let day: Int?; let minute: Int?; let list: String }
+        struct Order: Decodable { let `in`: [OrderIn]; let titles: [String] }
+        let ids: [ID]; let records: [Rec]; let order: Order
+    }
+    let reminders: Reminders
     let notifications: [Notif]
     let replies: [Reply]
 
@@ -235,6 +244,9 @@ private let rv = RPCVectors.shared
     func battery() async throws -> (level: Int, charging: Bool) { (57, true) }
     var alerts: [PhoneAlert] = []
     func notify(_ package: String, _ alert: PhoneAlert) async throws { alerts.append(alert) }
+    var todo: [PhoneReminder] = []
+    func reminders() async throws -> [PhoneReminder] { todo }
+    func completeReminder(_ id: String) async throws { todo.removeAll { $0.id == id } }
 }
 
 private func call(_ method: UInt8, _ args: [UInt8] = [], id: UInt8 = 1) -> Data {
@@ -398,4 +410,29 @@ let storageIDs = Data(RPCMethod.free)
     #expect(await ask(h, m)?.0 == .ok)
     #expect(await ask(h, call(RPCMethod.notify, [0, 9]))?.0 == .badRequest)
     #expect(await ask(h, call(RPCMethod.caps))?.1 == [Data([RPCMethod.notify]) + storageIDs])
+}
+
+@Test @MainActor func rpcReminders() async throws {
+    let r = rv.reminders
+    for i in r.ids { #expect(shortID(i.id) == i.short, "\(i.id)") }
+    for c in r.records {
+        let i = c.in
+        #expect(reminderRecord(PhoneReminder(id: i.id, dueDay: i.day, dueMinute: i.minute, list: "", color: i.color,
+                                             title: i.title), show: i.show) == hex(c.hex), "\(i.title)")
+    }
+    let order = r.order.in.map { PhoneReminder(id: $0.title, dueDay: $0.day, dueMinute: $0.minute, list: $0.list, color: 0, title: $0.title) }
+    #expect(sortReminders(order).map(\.title) == r.order.titles)
+
+    let h = FakeHost()
+    h.todo = order
+    #expect(await ask(h, call(RPCMethod.reminders, [3]))?.0 == .ask)
+    h.given["weather.app"] = ["reminders": true]
+    let got = try #require(await ask(h, call(RPCMethod.reminders, [3])))
+    #expect(got.0 == .ok && got.1.count == 3 && got.1.allSatisfy { $0[7] & 4 != 0 }, "limit, text hidden by default")
+    var id = Data()
+    id.le(shortID("e"))
+    #expect(await ask(h, call(RPCMethod.reminderDone, Array(id)))?.0 == .ok)
+    #expect(!h.todo.contains { $0.title == "e" })
+    #expect(await ask(h, call(RPCMethod.reminderDone, Array(id)))?.0 == .badRequest, "no such reminder now")
+    #expect(await ask(h, call(RPCMethod.caps))?.1 == [Data([RPCMethod.reminders, RPCMethod.reminderDone]) + storageIDs])
 }

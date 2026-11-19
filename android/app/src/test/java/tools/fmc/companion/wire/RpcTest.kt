@@ -270,4 +270,20 @@ class RpcTest {
         assertEquals(RpcStatus.OK, status(answer("a", m, p)))
         assertEquals(RpcStatus.BAD_REQUEST, status(answer("a", "R1Q".toByteArray() + byteArrayOf(1, 0x51, 0, 9), p)))
     }
+
+    @Test fun reminders() = runBlocking {
+        val r = v.getJSONObject("reminders")
+        r.getJSONArray("ids").let { a -> (0 until a.length()).map(a::getJSONObject) }.forEach {
+            assertEquals(it.getLong("short"), shortId(it.getString("id")))
+        }
+        r.getJSONArray("records").let { a -> (0 until a.length()).map(a::getJSONObject) }.forEach { c ->
+            val i = c.getJSONObject("in")
+            fun opt(k: String) = if (i.isNull(k)) null else i.getInt(k)
+            assertEquals(c.getString("hex"), reminderRecord(i.getString("id"), opt("day"), opt("minute"), i.getInt("color"),
+                i.getString("title"), i.getBoolean("show")).hex())
+        }
+        val p = FakePhone()
+        assertEquals(RpcStatus.UNAVAILABLE, status(answer("a", hex("523151011103"), p)), "Android has no reminders")
+        assertEquals(emptyList(), p.asked, "and asks nothing")
+    }
 }

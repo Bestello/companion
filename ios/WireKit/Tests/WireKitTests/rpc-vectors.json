@@ -598,5 +598,112 @@
    "bad": true,
    "note": "body not UTF-8"
   }
- ]
+ ],
+ "reminders": {
+  "ids": [
+   {
+    "id": "x",
+    "short": 4245442695
+   },
+   {
+    "id": "E4A1C2D3-5B6F-4C7D-8E9F-0A1B2C3D4E5F",
+    "short": 3420958333
+   },
+   {
+    "id": "x-apple-reminderkit://REMCDReminder/1A2B",
+    "short": 2858611287
+   }
+  ],
+  "records": [
+   {
+    "in": {
+     "id": "E4A1C2D3-5B6F-4C7D-8E9F-0A1B2C3D4E5F",
+     "day": 0,
+     "minute": 1080,
+     "color": 63488,
+     "title": "Купить молоко",
+     "show": true
+    },
+    "hex": "7daee7cb0038040300f8d09ad183d0bfd0b8d182d18c20d0bcd0bed0bbd0bed0bad0be"
+   },
+   {
+    "in": {
+     "id": "E4A1C2D3-5B6F-4C7D-8E9F-0A1B2C3D4E5F",
+     "day": 0,
+     "minute": 1080,
+     "color": 63488,
+     "title": "Купить молоко",
+     "show": false
+    },
+    "hex": "7daee7cb0038040700f8"
+   },
+   {
+    "in": {
+     "id": "x-apple-reminderkit://REMCDReminder/1A2B",
+     "day": -2,
+     "minute": null,
+     "color": 31,
+     "title": "Pay rent",
+     "show": true
+    },
+    "hex": "57f262aafe0000011f005061792072656e74"
+   },
+   {
+    "in": {
+     "id": "x",
+     "day": null,
+     "minute": null,
+     "color": 2016,
+     "title": "Someday",
+     "show": true
+    },
+    "hex": "87500cfd00000000e007536f6d65646179"
+   }
+  ],
+  "order": {
+   "note": "due ones first by day, in a day the ones without a time first, then by minute; then the rest by list name, then title",
+   "in": [
+    {
+     "title": "c",
+     "day": null,
+     "list": "Home"
+    },
+    {
+     "title": "a",
+     "day": 1,
+     "minute": 600,
+     "list": "Work"
+    },
+    {
+     "title": "d",
+     "day": null,
+     "list": "Errands"
+    },
+    {
+     "title": "b",
+     "day": -1,
+     "list": "Home"
+    },
+    {
+     "title": "e",
+     "day": 1,
+     "minute": 540,
+     "list": "Home"
+    },
+    {
+     "title": "f",
+     "day": 1,
+     "list": "Home"
+    }
+   ],
+   "titles": [
+    "b",
+    "f",
+    "e",
+    "a",
+    "d",
+    "c"
+   ]
+  }
+ }
 }

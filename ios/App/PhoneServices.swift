@@ -50,6 +50,7 @@ import WireKit
     func osAllowed(_ cap: String) -> Bool {
         switch cap {
         case "calendar": EKEventStore.authorizationStatus(for: .event) == .fullAccess
+        case "reminders": EKEventStore.authorizationStatus(for: .reminder) == .fullAccess
         case "location", "weather": [.authorizedWhenInUse, .authorizedAlways].contains(locations.authorizationStatus)
         case "notifications": false
         // ponytail: the system drops a notification the user turned off; no sync read of that here
@@ -64,6 +65,9 @@ import WireKit
         case "calendar":
             _ = try? await events.requestFullAccessToEvents()
             events = EKEventStore() // a store made before the grant sees no calendars
+        case "reminders":
+            _ = try? await events.requestFullAccessToReminders()
+            events = EKEventStore()
         case "location", "weather":
             if locations.authorizationStatus == .notDetermined { locations.requestWhenInUseAuthorization() }
         case "notify":
@@ -85,6 +89,32 @@ import WireKit
                                  tentative: e.status == .tentative || e.availability == .tentative,
                                  color: rgb565(r, g, b), title: e.title ?? "")
         }
+    }
+
+    func reminders() async throws -> [PhoneReminder] {
+        let store = events, cal = Calendar.current, today = cal.startOfDay(for: .now)
+        let found: [EKReminder] = await withCheckedContinuation { c in
+            store.fetchReminders(matching: store.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: nil)) {
+                nonisolated(unsafe) let r = $0 ?? []
+                c.resume(returning: r)
+            }
+        }
+        return found.map { r in
+            var (red, green, blue) = (CGFloat(0), CGFloat(0), CGFloat(0))
+            UIColor(cgColor: r.calendar.cgColor).getRed(&red, green: &green, blue: &blue, alpha: nil)
+            let due = r.dueDateComponents.flatMap { cal.date(from: $0) }
+            let timed = r.dueDateComponents?.hour != nil
+            return PhoneReminder(id: r.calendarItemIdentifier,
+                                 dueDay: due.flatMap { cal.dateComponents([.day], from: today, to: cal.startOfDay(for: $0)).day },
+                                 dueMinute: timed ? due.map { cal.component(.hour, from: $0) * 60 + cal.component(.minute, from: $0) } : nil,
+                                 list: r.calendar.title, color: rgb565(red, green, blue), title: r.title ?? "")
+        }
+    }
+
+    func completeReminder(_ id: String) async throws {
+        guard let r = events.calendarItem(withIdentifier: id) as? EKReminder else { throw RPCStatus.badRequest }
+        r.isCompleted = true
+        try events.save(r, commit: true)
     }
 
     func location() async throws -> LocationFix {

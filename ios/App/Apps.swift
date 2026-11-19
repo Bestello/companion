@@ -685,6 +685,7 @@ struct AppView: View {
     static func title(_ cap: String) -> String {
         switch cap {
         case "calendar": String(localized: "Calendars")
+        case "reminders": String(localized: "Reminders")
         case "location": String(localized: "Location")
         case "weather": String(localized: "Weather")
         case "notifications": String(localized: "Notifications")
@@ -696,6 +697,7 @@ struct AppView: View {
     static func symbol(_ cap: String) -> String {
         switch cap {
         case "calendar": "calendar"
+        case "reminders": "checklist"
         case "location": "location.fill"
         case "weather": "cloud.sun.fill"
         case "notifications": "bell.badge.fill"
@@ -708,7 +710,7 @@ struct AppView: View {
         switch cap {
         case "calendar", "notifications": .red
         case "notify": .orange
-        case "location": .blue
+        case "location", "reminders": .blue
         case "weather": .cyan
         default: .gray
         }

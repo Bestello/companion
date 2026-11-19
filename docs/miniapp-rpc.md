@@ -42,6 +42,7 @@ Capabilities:
 |---|---|---|
 | (none) | `caps`, `storage.*`, `phone.battery` | — |
 | `calendar` | `calendar.events` | EventKit full access (iOS 17+ `requestFullAccessToEvents`); `READ_CALENDAR` |
+| `reminders` | `reminders`, `reminders.complete` | iOS: EventKit full access to reminders (`requestFullAccessToReminders`). Android: none, the methods answer `UNAVAILABLE` |
 | `location` | `location` | When In Use, reduced accuracy is enough; `ACCESS_COARSE_LOCATION` |
 | `weather` | `weather` | the same as `location` (the phone needs it; the watch gets no position) |
 | `http:<host>` | `http.get` and `http.request` to that host | — |
@@ -119,6 +120,8 @@ Characters the watch has no glyph for stay as they are (they draw as `?`).
 |---|---|---|
 | `0x01` | `caps` | — |
 | `0x10` | `calendar.events` | `calendar` |
+| `0x11` | `reminders` | `reminders` |
+| `0x12` | `reminders.complete` | `reminders` |
 | `0x20` | `location` | `location` |
 | `0x30` | `weather` | `weather` |
 | `0x40` | `http.get` | `http:<host>` |
@@ -157,6 +160,31 @@ day:i8 ‖ start:u16 ‖ duration:u16 ‖ flags:u8 ‖ color:u16 ‖ title
 | `flags` | bit 0 all-day, bit 1 tentative, bit 2 text hidden |
 | `color` | calendar colour, RGB565 |
 | `title` | ≤ 64 bytes; empty with bit 2 |
+
+### `0x11 reminders`, `0x12 reminders.complete`
+
+iOS only. Android has no system reminders API another app can read (each app keeps its own), so both answer
+`UNAVAILABLE` there and `caps` never lists them.
+
+`reminders`: args `limit:u8`, 1–20 (clamped). The incomplete reminders of every list, due ones first by day, in a
+day the ones without a time first, then by minute; then the ones without a due date by list name, then title
+(`reminders.order` vectors). Records (`reminders.records` vectors):
+
+```
+id:u32 ‖ day:i8 ‖ minute:u16 ‖ flags:u8 ‖ color:u16 ‖ title
+```
+
+| Field | |
+|---|---|
+| `id` | FNV-1a 32 of EventKit's `calendarItemIdentifier` (UTF-8): short, stable while the reminder lives (`reminders.ids`) |
+| `day` | due date in days from today, negative when overdue; 0 without one |
+| `minute` | due time, minute of the day, local; 0 without one |
+| `flags` | bit 0 has a due date, bit 1 has a due time, bit 2 text hidden |
+| `color` | the list's colour, RGB565 |
+| `title` | ≤ 64 bytes; empty with bit 2 ("Show text on the watch", as calendar titles) |
+
+`reminders.complete`: args `id:u32`. Marks that reminder complete; `OK`, no records. No incomplete reminder with
+that id (done meanwhile, deleted): `BAD_REQUEST`.
 
 ### `0x20 location`
 

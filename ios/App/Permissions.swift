@@ -105,6 +105,7 @@ import WireKit
     static func label(_ cap: String) -> String {
         switch cap {
         case "calendar": String(localized: "your calendar")
+        case "reminders": String(localized: "your reminders")
         case "location": String(localized: "your approximate location")
         case "weather": String(localized: "the weather where you are")
         case "notifications": String(localized: "your notifications")

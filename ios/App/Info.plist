@@ -39,6 +39,8 @@
 	<string>Watch apps you allow show your upcoming events on the watch.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Watch apps you allow get the weather and your town, rounded to about 10 km.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Watch apps you allow show your reminders on the watch and mark them done.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>

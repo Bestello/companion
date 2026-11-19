@@ -40,6 +40,7 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSBluetoothAlwaysUsageDescription: FMC Companion connects to your watch to install watch faces and to read which apps are on it.
         NSCalendarsFullAccessUsageDescription: Watch apps you allow show your upcoming events on the watch.
+        NSRemindersFullAccessUsageDescription: Watch apps you allow show your reminders on the watch and mark them done.
         NSLocationWhenInUseUsageDescription: Watch apps you allow get the weather and your town, rounded to about 10 km.
         ITSAppUsesNonExemptEncryption: false
         # fmc://install?url=… from the Install button on fmc.tools (FaceLink in Catalog.swift)

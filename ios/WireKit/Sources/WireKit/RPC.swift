@@ -9,6 +9,7 @@ public enum RPCStatus: UInt8, Error, Sendable {
 }
 
 public enum RPCMethod {
+    public static let reminders: UInt8 = 0x11, reminderDone: UInt8 = 0x12
     public static let caps: UInt8 = 0x01, calendar: UInt8 = 0x10, location: UInt8 = 0x20, weather: UInt8 = 0x30
     public static let http: UInt8 = 0x40, httpRequest: UInt8 = 0x41, notifications: UInt8 = 0x50
     public static let storageGet: UInt8 = 0x60, storagePut: UInt8 = 0x61, storageDelete: UInt8 = 0x62
@@ -119,6 +120,40 @@ public func calendarRecord(_ e: CalendarEvent, show: Bool) -> Data {
     d.append((e.allDay ? 1 : 0) | (e.tentative ? 2 : 0) | (show ? 0 : 4))
     d.le(e.color)
     return show ? d + utf8Cut(e.title, 64) : d
+}
+
+/// An incomplete reminder. `dueDay` days from today (nil: no due date), `dueMinute` its minute of the day (nil: no
+/// time); `color` its list's, RGB565.
+public struct PhoneReminder: Equatable, Sendable {
+    public var id: String, dueDay: Int?, dueMinute: Int?, list: String, color: UInt16, title: String
+    public init(id: String, dueDay: Int?, dueMinute: Int?, list: String, color: UInt16, title: String) {
+        (self.id, self.dueDay, self.dueMinute, self.list, self.color, self.title) = (id, dueDay, dueMinute, list, color, title)
+    }
+}
+
+/// FNV-1a 32 of the id's UTF-8: the watch's handle for a reminder, stable while the reminder lives.
+public func shortID(_ id: String) -> UInt32 {
+    id.utf8.reduce(0x811C_9DC5 as UInt32) { ($0 ^ UInt32($1)) &* 0x0100_0193 }
+}
+
+/// Due ones first by day, in a day the ones without a time first, then by minute; then the rest by list, then title.
+public func sortReminders(_ rs: [PhoneReminder]) -> [PhoneReminder] {
+    rs.sorted {
+        ($0.dueDay == nil ? 1 : 0, $0.dueDay ?? 0, $0.dueMinute.map { $0 + 1 } ?? 0, $0.list, $0.title)
+            < ($1.dueDay == nil ? 1 : 0, $1.dueDay ?? 0, $1.dueMinute.map { $0 + 1 } ?? 0, $1.list, $1.title)
+    }
+}
+
+/// `id:u32 ‖ day:i8 ‖ minute:u16 ‖ flags:u8 ‖ color:u16 ‖ title`; flags bit 0 due date, bit 1 due time, bit 2 text
+/// hidden.
+public func reminderRecord(_ r: PhoneReminder, show: Bool) -> Data {
+    var d = Data()
+    d.le(shortID(r.id))
+    d.append(i8(r.dueDay ?? 0))
+    d.u16(r.dueMinute ?? 0)
+    d.append((r.dueDay != nil ? 1 : 0) | (r.dueMinute != nil ? 2 : 0) | (show ? 0 : 4))
+    d.le(r.color)
+    return show ? d + utf8Cut(r.title, 64) : d
 }
 
 /// 0…1 per channel.
@@ -314,6 +349,10 @@ public func notificationRecord(_ n: PhoneNotification, show: Bool) -> Data {
     func battery() async throws -> (level: Int, charging: Bool)
     /// A local notification from the watch app in `package`.
     func notify(_ package: String, _ alert: PhoneAlert) async throws
+    /// The incomplete reminders in every list.
+    func reminders() async throws -> [PhoneReminder]
+    /// Marks the reminder with this (full) id complete.
+    func completeReminder(_ id: String) async throws
 }
 
 /// The reply messages to one message from the app in `package`'s slot; nil when it is not a request.
@@ -358,6 +397,7 @@ public func answer(_ message: Data, package: String?, host: any RPCHost,
         let on = { (cap: String) in g[cap] == true && host.osAllowed(cap) }
         var ids: [UInt8] = []
         if on("calendar") { ids.append(RPCMethod.calendar) }
+        if on("reminders") { ids += [RPCMethod.reminders, RPCMethod.reminderDone] }
         if on("location") { ids.append(RPCMethod.location) }
         if on("weather") { ids.append(RPCMethod.weather) }
         if g.contains(where: { $0.key.hasPrefix("http:") && $0.value }) { ids += [RPCMethod.http, RPCMethod.httpRequest] }
@@ -373,6 +413,18 @@ public func answer(_ message: Data, package: String?, host: any RPCHost,
             .sorted { ($0.day, $0.allDay ? 0 : 1, $0.start) < ($1.day, $1.allDay ? 0 : 1, $1.start) }
         let show = host.showText(package)
         return events.prefix(limit).map { calendarRecord($0, show: show) }
+    case RPCMethod.reminders:
+        guard let limit = a.first else { throw RPCStatus.badRequest }
+        try permit("reminders")
+        let show = host.showText(package)
+        return sortReminders(try await host.reminders()).prefix(min(max(Int(limit), 1), 20)).map { reminderRecord($0, show: show) }
+    case RPCMethod.reminderDone:
+        guard a.count == 4 else { throw RPCStatus.badRequest }
+        try permit("reminders")
+        let id = args.le(UInt32.self, at: 0)
+        guard let r = try await host.reminders().first(where: { shortID($0.id) == id }) else { throw RPCStatus.badRequest }
+        try await host.completeReminder(r.id)
+        return []
     case RPCMethod.location:
         try permit("location")
         return [locationRecord(try await host.location())]

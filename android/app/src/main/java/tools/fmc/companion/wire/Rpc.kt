@@ -18,6 +18,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 object Method {
     const val CAPS = 0x01
     const val CALENDAR = 0x10
+    const val REMINDERS = 0x11
+    const val REMINDER_DONE = 0x12
     const val LOCATION = 0x20
     const val WEATHER = 0x30
     const val HTTP = 0x40
@@ -110,6 +112,17 @@ fun calendarRecord(e: Event, show: Boolean): ByteArray = buf {
     u8((if (e.allDay) 1 else 0) or (if (e.tentative) 2 else 0) or (if (show) 0 else 4))
     le16(e.color)
     if (show) add(utf8Cut(e.title, 64))
+}
+
+/** FNV-1a 32 of the id's UTF-8: the watch's handle for a reminder (iOS; kept here for the shared vectors). */
+fun shortId(id: String): Long = id.toByteArray().fold(0x811C9DC5L) { h, b -> ((h xor (b.toLong() and 0xFF)) * 0x01000193L) and 0xFFFFFFFFL }
+
+/** `id:u32 ‖ day:i8 ‖ minute:u16 ‖ flags:u8 ‖ color:u16 ‖ title`; flags bit 0 due date, bit 1 due time, bit 2 hidden. */
+fun reminderRecord(id: String, day: Int?, minute: Int?, color: Int, title: String, show: Boolean): ByteArray = buf {
+    le32(shortId(id)); u8(day ?: 0); le16(minute ?: 0)
+    u8((if (day != null) 1 else 0) or (if (minute != null) 2 else 0) or (if (show) 0 else 4))
+    le16(color)
+    if (show) add(utf8Cut(title, 64))
 }
 
 /** 0.1° rounded; the age in minutes, 0xFFFF for older. */
@@ -281,6 +294,8 @@ suspend fun answer(pkg: String, msg: ByteArray, phone: Phone, budgetMs: Long = 7
     } catch (e: RpcError) {
         replies(r.id, e.status)
     }
+    // iOS only: Android has no reminders API for other apps (docs/miniapp-rpc.md)
+    if (method == Method.REMINDERS || method == Method.REMINDER_DONE) return replies(r.id, RpcStatus.UNAVAILABLE)
     val cap = capOf(method, args) ?: return replies(r.id, RpcStatus.BAD_REQUEST)
     if (cap.isNotEmpty()) when (grants[cap]) {
         null -> { phone.ask(pkg, cap, method == Method.HTTP_REQUEST); return replies(r.id, RpcStatus.ASK) }
