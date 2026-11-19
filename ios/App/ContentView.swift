@@ -5,7 +5,7 @@ import WireKit
 struct FMCCompanionApp: App {
     @UIApplicationDelegateAdaptor private var delegate: AppDelegate
     @State private var account = Account()
-    @State private var watch = WatchModel()
+    @State private var watch = WatchModel.shared
     @State private var catalog = Catalog()
     // DEBUG screenshots: `-watch` opens the Watch tab, `-apps` Apps, `-app <name>` that app's page
     @State private var tab = CommandLine.arguments.contains("-watch") ? 1
@@ -204,7 +204,8 @@ struct WatchStatus: View {
     private var connected: Bool { if case .checked = watch.phase { true } else { false } }
 
     private var title: LocalizedStringKey {
-        switch watch.phase {
+        if watch.installing { return "Updating" }
+        return switch watch.phase {
         case .idle: "Not connected"
         case .checking: "Connecting…"
         case .checked: "Connected"
@@ -213,7 +214,8 @@ struct WatchStatus: View {
     }
 
     private var detail: String {
-        switch watch.phase {
+        if watch.installing { return String(localized: "The watch is installing the update…") }
+        return switch watch.phase {
         case .idle: String(localized: "Tap Connect to read it")
         case .checking: String(localized: "This takes a few seconds")
         case .checked(let state): state == nil ? String(localized: "Ready for watch faces") : String(localized: "App Loader found")
@@ -222,7 +224,8 @@ struct WatchStatus: View {
     }
 
     private var detailColor: Color {
-        switch watch.phase {
+        if watch.installing { return .secondary }
+        return switch watch.phase {
         case .checked: .fmcSuccess
         case .failed: .fmcWarning
         default: .secondary

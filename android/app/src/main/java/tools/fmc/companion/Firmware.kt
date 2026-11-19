@@ -153,6 +153,7 @@ object FirmwareModel {
             DevLog.log(context, "Firmware sent: ${check?.firmware?.version}")
             Analytics.track("firmware_installed")
             flashed = true
+            model.afterFlash(check?.firmware?.stub ?: 0)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -161,6 +162,12 @@ object FirmwareModel {
             flash = null
             if (services) RpcService.start(context)
         }
+    }
+
+    /** The watch answered with the new firmware. */
+    fun landed(context: Context) {
+        flashed = false
+        DevLog.log(context, "Firmware installed: the watch answered with it")
     }
 
     /** Installs the store's App Loader over K, then reads the watch again. */
@@ -238,7 +245,7 @@ fun FirmwareScreen(model: AppModel, back: () -> Unit) {
             item {
                 Section("On the watch", footer = if (connected) null else "Connect on the Watch tab to read the watch.") {
                     row("Firmware") {
-                        Text(when { state != null -> "Patched · stub ${state.stub.version}"; connected -> "Stock"; else -> "—" },
+                        Text(when { model.installing -> "Installing…"; state != null -> "Patched · stub ${state.stub.version}"; connected -> "Stock"; else -> "—" },
                             color = Fmc.secondary)
                     }
                     HorizontalDivider()
@@ -258,7 +265,8 @@ fun FirmwareScreen(model: AppModel, back: () -> Unit) {
                         val left = f.left?.let { s -> if (s >= 60) ", about ${s / 60} min ${s % 60} s left" else ", about $s s left" } ?: ""
                         "Sending the firmware: $p%$left. Keep the phone next to the watch and this screen open."
                     } ?: f.step
-                    fm.flashed -> "Firmware sent. The watch installs it and restarts by itself, which takes a few minutes. Then connect again on the Watch tab."
+                    model.installing -> "The watch is installing the update and restarts by itself, which takes a few minutes. The app reads it every 20 seconds until it's back."
+                    fm.flashed -> "Firmware sent, but the watch hasn't answered with it in 10 minutes. Check the watch, then connect again on the Watch tab."
                     offer -> "The firmware is about 57 MB. Before installing: charge the watch, keep the phone next to it, and close Nothing X."
                     else -> null
                 }

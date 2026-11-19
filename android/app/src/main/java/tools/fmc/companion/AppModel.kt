@@ -8,6 +8,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
 import tools.fmc.companion.wire.LoaderState
+import tools.fmc.companion.wire.recheckDue
+import tools.fmc.companion.wire.retry
 
 sealed interface Phase {
     data object Idle : Phase
@@ -76,6 +78,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     init {
         viewModelScope.launch { AppUpdate.check() }
+        viewModelScope.launch { WatchLink.back.collect { linkCameBack() } }
         viewModelScope.launch {
             account.restore()
             user = account.user
@@ -83,7 +86,37 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** When the last read began (ms). */
+    private var lastCheck: Long? = null
+    /** A firmware was sent: the watch installs it and restarts, and is read every 20 s till it answers with it. */
+    var installing by mutableStateOf(false)
+        private set
+
+    /**
+     * RpcService has the watch again after a drop (a restart, out of range): read it, so stub, loader and apps aren't
+     * the old ones. Not before the user's first read, not twice within 30 s, not during a restart wait; installs and
+     * flashes stop the service, so none of them is running. Android shares the LE link between GATT clients.
+     */
+    fun linkCameBack() {
+        if (!recheckDue(phase == Phase.Idle, phase == Phase.Checking || installing, lastCheck, System.currentTimeMillis())) return
+        DevLog.log(getApplication(), "link back: reading the watch again")
+        check()
+    }
+
+    /** After a firmware is sent: every 20 s for up to 10 min, until the watch answers with [stub] or later; not tied
+     *  to a screen. */
+    fun afterFlash(stub: Long) = viewModelScope.launch {
+        installing = true
+        val ok = try {
+            retry(20_000, 600_000) { check().join(); (loader?.stub?.version ?: 0) >= stub }
+        } finally {
+            installing = false
+        }
+        if (ok) FirmwareModel.landed(getApplication())
+    }
+
     fun check() = viewModelScope.launch {
+        lastCheck = System.currentTimeMillis()
         phase = Phase.Checking
         phase = try {
             Phase.Checked(readWatch(getApplication(), store))

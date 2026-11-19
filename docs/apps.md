@@ -71,6 +71,14 @@ The catch is that replies don't carry a request id. Every session sees every rep
 time. On iOS `KLock` does that between our own sessions. Another host sending its own requests at the same moment can
 still take our reply, and nothing guards against that.
 
+The watch is read again by itself in two cases. When the listener's link comes back after a drop (a restart, out of
+range), `WatchModel.linkCameBack` / `AppModel.linkCameBack` runs `check()`: not before the user's first read, not
+within 30 s of the last one, not while a restart is awaited (`recheckDue` in WireKit and the wire). Installs, flashes
+and K jobs stop the listener, so they never meet that read. After a firmware is sent, `awaitRestart` /
+`afterFlash` reads the watch every 20 s for up to 10 min (`retry`) until it answers with the new stub; the Watch tab
+and Firmware page say "The watch is installing the update…" meanwhile. App installs and deletes, the order and
+App Loader updates call `check()` themselves.
+
 Installing a watch face is the exception. The stock session binds the watch, so `RPCListener` stops for the install
 and the user has to close Nothing X first.
 

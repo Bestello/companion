@@ -83,6 +83,8 @@ actor KLock {
             }
             apps = state.apps.mapValues(\.name)
             stub = state.stub.version
+            // the watch is back (a restart, a reconnect): the Watch tab and Firmware page read it again
+            WatchModel.shared.linkCameBack()
             _ = try await KLock.shared.run { try await session.ping() } // registers: the stub sends us EVENTs
             _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
             DevLog.shared.log("listening")

@@ -824,13 +824,13 @@ private fun WatchStatus(model: AppModel, check: () -> Unit) {
                 }
             }
             Column {
-                val title = when (phase) {
+                val title = if (model.installing) "Updating" else when (phase) {
                     Phase.Idle -> "Not connected"
                     Phase.Checking -> "Connecting…"
                     is Phase.Checked -> "Connected"
                     is Phase.Failed -> "Couldn't connect"
                 }
-                val (detail, color) = when (phase) {
+                val (detail, color) = if (model.installing) "The watch is installing the update…" to Fmc.secondary else when (phase) {
                     Phase.Idle -> "Tap Connect to read it" to Fmc.secondary
                     Phase.Checking -> "This takes a few seconds" to Fmc.secondary
                     is Phase.Checked -> (if (phase.state == null) "Ready for watch faces" else "App Loader found") to Fmc.success

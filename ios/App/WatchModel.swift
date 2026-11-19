@@ -6,6 +6,8 @@ import WireKit
 // Features that need the loader show only when `loader` is set.
 
 @MainActor @Observable final class WatchModel {
+    /// One per app: the RPC listener reads the watch again through it when the link comes back.
+    static let shared = WatchModel()
     enum Phase: Equatable {
         case idle, checking
         /// Connected; nil = stock firmware (or a stub from before 2026-11-13, which has no K).
@@ -28,7 +30,13 @@ import WireKit
         switch phase { case .idle, .checking: true; default: false }
     }
 
+    /// When the last read began.
+    private(set) var lastCheck: Date?
+    /// A firmware was sent: the watch installs it and restarts, and is read every 20 s till it answers with it.
+    private(set) var installing = false
+
     func check() async {
+        lastCheck = .now
         phase = .checking
         do {
             let state = try await read()
@@ -41,6 +49,27 @@ import WireKit
         } catch {
             phase = .failed(error.localizedDescription)
             lastLoader = nil
+        }
+    }
+
+    /// The RPC listener has the watch again after a drop (a restart, out of range): read it, so stub, loader and
+    /// apps aren't the old ones. Not before the user's first read, not twice within 30 s, not during a restart wait;
+    /// installs and flashes stop the listener, so none of them is running. Its own K session shares the link
+    /// (KLock keeps the requests apart).
+    func linkCameBack() {
+        guard recheckDue(idle: phase == .idle, busy: phase == .checking || installing, last: lastCheck, now: .now) else { return }
+        DevLog.shared.log("link back: reading the watch again")
+        Task { await check() }
+    }
+
+    /// After a firmware is sent: every 20 s for up to 10 min, until the watch answers with `stub` or later.
+    /// true when it did.
+    func awaitRestart(stub target: UInt32) async -> Bool {
+        installing = true
+        defer { installing = false }
+        return await retry(every: .seconds(20), for: .seconds(600)) {
+            await check()
+            return (loader?.stub.version ?? 0) >= target
         }
     }
 

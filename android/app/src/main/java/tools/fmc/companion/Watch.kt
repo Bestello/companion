@@ -276,3 +276,8 @@ suspend fun installFaceOnWatch(
         ?: if (id in installed) installed else installed + id
     remember(context, onWatch, d.counted?.let { if (slot != null || id in installed) it.count else it.count + 1 }, cap, d.header)
 }
+
+/** The services' link has the watch again after a drop; AppModel reads it again (debounced). */
+object WatchLink {
+    val back = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+}

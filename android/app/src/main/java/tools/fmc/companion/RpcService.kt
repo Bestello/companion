@@ -94,6 +94,8 @@ class RpcService : Service() {
                 }
                 Log.i(TAG, "listening")
                 DevLog.log(this, "listening")
+                // the watch is back (a restart, a reconnect): the Watch tab and Firmware page read it again
+                WatchLink.back.tryEmit(Unit)
                 listen(session, phone)
             } catch (e: CancellationException) {
                 throw e

@@ -134,6 +134,12 @@ import WireKit
         }
     }
 
+    /// The watch answered with the new firmware.
+    func landed() {
+        flashed = false
+        DevLog.shared.log("Firmware installed: the watch answered with it")
+    }
+
     /// One package over K (the loader or an app, into its own slot), with the RPC listener off meanwhile.
     static func install(_ pkg: Data, progress: @escaping @Sendable (Double) -> Void) async throws {
         try await k { _ = try await WireKit.install($0, package: pkg, progress: progress) }
@@ -191,7 +197,8 @@ struct FirmwareView: View {
         List {
             Section {
                 LabeledContent("Firmware") {
-                    if let state { Text("Patched · stub \(state.stub.version)") }
+                    if watch.installing { Text("Installing…") }
+                    else if let state { Text("Patched · stub \(state.stub.version)") }
                     else if case .checked = watch.phase { Text("Stock") }
                     else { Text("—") }
                 }
@@ -267,8 +274,10 @@ struct FirmwareView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     if let f = model.flash {
                         flashStatus(f)
+                    } else if watch.installing {
+                        Text("The watch is installing the update and restarts by itself, which takes a few minutes. The app reads it every 20 seconds until it's back.")
                     } else if model.flashed {
-                        Text("Firmware sent. The watch installs it and restarts by itself, which takes a few minutes. Then connect again on the Watch tab.")
+                        Text("Firmware sent, but the watch hasn't answered with it in 10 minutes. Check the watch, then connect again on the Watch tab.")
                     } else if model.firmwareUpdate(state) || (state == nil && connected) {
                         Text("The firmware is about 57 MB. Before installing: charge the watch, keep the phone next to it, and close Nothing X.")
                     }
@@ -278,7 +287,14 @@ struct FirmwareView: View {
         }
         .navigationTitle("Firmware")
         .alert("Close Nothing X first", isPresented: $confirmFlash) {
-            Button("Install") { Task { await model.flashFirmware() } }
+            // not tied to this screen: the wait goes on if the user leaves it
+            Button("Install") {
+                Task {
+                    let target = UInt32(model.check?.firmware?.stub ?? 0)
+                    await model.flashFirmware()
+                    if model.flashed, await watch.awaitRestart(stub: target) { model.landed() }
+                }
+            }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The watch talks to one app at a time. Close Nothing X (swipe it away in the app switcher), then install.\n\nThe watch should be charged and the phone next to it. Keep this screen open until the update is sent; the watch then installs it and restarts.\n\nAfterwards Nothing X may not see the watch. Then forget the watch in Bluetooth settings and add it again in Nothing X.")
