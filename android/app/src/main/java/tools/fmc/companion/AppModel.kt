@@ -91,6 +91,8 @@ class AppModel(app: Application) : AndroidViewModel(app) {
             Phase.Failed(e.message ?: "Couldn't read the watch.")
         }
         lastLoader = loader
+        // an order the watch refused with Busy goes now
+        if (AppOrder.unsent) viewModelScope.launch { AppOrder.send(getApplication(), this@AppModel) }
         if (phase is Phase.Checked) Analytics.track("watch_connected", mapOf("firmware" to if (loader == null) "stock" else "patched"))
     }
 

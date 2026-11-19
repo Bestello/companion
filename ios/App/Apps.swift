@@ -69,16 +69,49 @@ struct WatchApp: Identifiable {
         }.map(\.element)
     }
 
+    /// The saved order of the watch read last.
+    var names: [String] { byWatch[watch ?? ""] ?? [] }
+    /// Changed on the phone and not on the watch yet: sent on Done, again after a Busy on the next read.
+    private(set) var unsent = false
+    private(set) var sending = false
+    /// Why the last send didn't reach the watch.
+    private(set) var status: String?
+
     func set(_ names: [String]) {
         byWatch[watch ?? ""] = names
         UserDefaults.standard.set(byWatch, forKey: Self.key)
-        Task { await Self.send(names) }
+        unsent = true
     }
 
-    /// TODO(app-order): send the order to the watch over K (FirmwareModel.k, like remove) once cmf-watch-sdk
-    /// docs/app-order.md (branch app-order) says the command and bytes. Until then it stays on the phone.
-    static func send(_ names: [String]) async {
-        DevLog.shared.log("app order saved on the phone (\(names.count) apps); the watch doesn't take it yet")
+    /// The loader package with this order in it (cmf-watch-sdk docs/app-order.md); as it is when it has no table.
+    /// Every loader the phone installs goes through here, or an update would put the menu back in slot order.
+    func patched(_ loader: Data) -> Data { (try? setOrder(loader, names: Array(names.prefix(16)))) ?? loader }
+
+    /// The order goes inside the loader: the store's loader with the table patched, installed to slot 0xFF.
+    func send(_ watch: WatchModel) async {
+        guard unsent, !sending, watch.loader?.loader != nil else { return }
+        sending = true
+        defer { sending = false }
+        let fw = FirmwareModel.shared
+        if fw.check?.loaderPackage == nil { await fw.refresh() }
+        guard let loader = fw.check?.loaderPackage else {
+            status = String(localized: "Couldn't load the App Loader from fmc.tools to send the order. Pull to refresh to try again.")
+            return
+        }
+        do {
+            try await FirmwareModel.install(try setOrder(loader, names: Array(names.prefix(16)))) { _ in }
+            DevLog.shared.log("app order sent: \(names.joined(separator: ", "))")
+            unsent = false
+            status = nil
+            await watch.check()
+        } catch InstallError.busy {
+            // the menu holds the loader while it is open; tried again on the next read of the watch
+            status = String(localized: "The Apps menu or an app is open on the watch. The order goes when you're back on the watch face and pull to refresh.")
+        } catch OrderError.noTable {
+            status = String(localized: "The App Loader on fmc.tools is older than the app order. The order stays on this phone for now.")
+        } catch {
+            status = String(localized: "Couldn't send the order: \(error.localizedDescription)")
+        }
     }
 }
 
@@ -385,6 +418,9 @@ struct AppsView: View {
         .toolbar { if !showAll, !apps.isEmpty { EditButton() } }
         .environment(\.editMode, $editMode)
         .onChange(of: showAll) { editMode = .inactive }
+        .onChange(of: editMode.isEditing) { _, editing in
+            if !editing { Task { await AppOrder.shared.send(watch) } }
+        }
         .task { await StoreApps.shared.load() }
         // the list of installed apps is the watch's: read it here too, not only from Connect on the Watch tab
         .task { if watch.phase == .idle { await watch.check() } }
@@ -408,7 +444,7 @@ struct AppsView: View {
                         AppOrder.shared.set(names)
                     }
             } footer: {
-                Text("Drag to set the order of the apps on the watch.")
+                Text("Drag to set the order of the Apps menu on the watch. It goes to the watch inside the App Loader (about 54 KB) when you tap Done.")
             }
         } else if !updates.isEmpty {
             Section {
@@ -420,7 +456,14 @@ struct AppsView: View {
             }
         }
         if !editMode.isEditing, !current.isEmpty {
-            Section("On the watch") { ForEach(current) { row($0) } }
+            Section {
+                ForEach(current) { row($0) }
+            } header: {
+                Text("On the watch")
+            } footer: {
+                if AppOrder.shared.sending { Text("Sending the order to the watch…") }
+                else if let s = AppOrder.shared.status { Text(s) }
+            }
         }
     }
 

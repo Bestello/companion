@@ -34,8 +34,15 @@ miniapp-rpc.md first.
 Edit on the Installed list (iOS EditButton and drag, Android Edit and up/down arrows) sets the order of the apps
 on the watch. It is a list of package names kept on the phone per watch (iOS UserDefaults `app-order`, keyed by the
 watch's BLE identifier; Android prefs `app`, `order|<watch id>`), and the list shows that order; apps it doesn't name
-come after, by slot. Sending it to the watch waits on the stub's command: `AppOrder.send` on both platforms is a
-TODO until cmf-watch-sdk `docs/app-order.md` (branch `app-order`) fixes the bytes.
+come after, by slot.
+
+The order reaches the watch inside the loader package (cmf-watch-sdk `docs/app-order.md`): Done patches the store's
+loader with the names in its `WP2ORDER` table (`setOrder` in WireKit and the Android wire, checked against
+`order-vectors.json` from the SDK's own `package.set_order`, made by `tools/order-vectors.py`), re-signs it and
+installs it to slot `0xFF`, about 54 KB. `Busy` (the Apps menu or an app on screen) leaves it unsent; it goes on the
+next read of the watch. Update App Loader installs the patched loader too, and the Firmware page compares the watch's
+loader CRC with that, so an ordered loader doesn't read as outdated. A store loader without the table (older than the
+feature) can't carry the order: it stays on the phone.
 
 The stub has 8 app slots before version 7 and 16 from it (`appSlots(stub:)` in WireKit, `appSlots` in the Android
 wire). The version is INFO on slot `0xFE`; `readLoader`, `installed` and `install` read that many.

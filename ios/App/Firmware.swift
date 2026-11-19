@@ -48,7 +48,8 @@ import WireKit
 
     /// The store's loader differs from the one on the watch (or the watch has none).
     func loaderUpdate(_ state: LoaderState?) -> Bool {
-        guard let state, let want = check?.loaderHeader else { return false }
+        // the store's loader with the phone's app order in it: that is what Update installs
+        guard let state, let pkg = check?.loaderPackage, let want = parseHeader(AppOrder.shared.patched(pkg)) else { return false }
         return state.loader?.crc != want.crc
     }
 
@@ -157,12 +158,13 @@ import WireKit
 
     /// Installs the store's App Loader over K, then reads the watch again.
     func updateLoader(_ watch: WatchModel) async {
-        guard let pkg = check?.loaderPackage else { return }
+        guard let store = check?.loaderPackage else { return }
+        let pkg = AppOrder.shared.patched(store)
         progress = 0
         defer { progress = nil }
         do {
             try await Self.install(pkg) { p in Task { @MainActor in self.progress = p } }
-            DevLog.shared.log("App Loader installed (crc \(String(format: "%08x", check?.loaderHeader?.crc ?? 0)))")
+            DevLog.shared.log("App Loader installed (crc \(String(format: "%08x", parseHeader(pkg)?.crc ?? 0)))")
             Analytics.track("loader_installed")
             error = nil
             await watch.check()

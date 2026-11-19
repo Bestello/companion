@@ -77,6 +77,22 @@ class InstallTest {
         assertEquals(16, assertFailsWith<InstallError.NoFreeSlot> { install(f, pkgHex) {} }.slots)
     }
 
+    /** order-vectors.json: tools/order-vectors.py, from the SDK's own package.set_order. */
+    @Test fun orderMatchesSdk() {
+        val o = org.json.JSONObject(java.io.File(System.getProperty("vectors"), "order-vectors.json").readText())
+        fun names(a: org.json.JSONArray) = List(a.length()) { a.getString(it) }
+        val ok = o.getJSONArray("ok")
+        for (i in 0 until ok.length()) {
+            val c = ok.getJSONObject(i)
+            assertEquals(c.getString("hex"), setOrder(hex(o.getString("loader")), names(c.getJSONArray("names"))).hex())
+        }
+        val bad = o.getJSONArray("bad")
+        for (i in 0 until bad.length()) {
+            val c = bad.getJSONObject(i)
+            assertFailsWith<OrderError>(c.getString("note")) { setOrder(hex(c.getString("loader")), names(c.getJSONArray("names"))) }
+        }
+    }
+
     @Test fun bytesHelpers() {
         assertContentEquals(bytes(1, 0, 0, 0x80), buf { le32(0x8000_0001L) })
         assertEquals(0x8000_0001L, bytes(1, 0, 0, 0x80).le32(0))

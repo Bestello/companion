@@ -80,3 +80,30 @@ suspend fun install(s: Requester, pkg: ByteArray, progress: (Double) -> Unit): I
 suspend fun remove(s: Requester, slot: Int) {
     check(s.call(Cmd.DELETE, bytes(slot)))
 }
+
+// Apps menu order (cmf-watch-sdk docs/app-order.md)
+
+/** No single WP2ORDER table in the image (a loader older than the app order), over 16 names, or a name not 1..23
+ *  UTF-8 bytes. */
+class OrderError(message: String) : Exception(message)
+
+/**
+ * The loader package with the Apps menu order [names] (package names, first row first) in its WP2ORDER table,
+ * re-signed: the image CRC at 0x30, then the header CRC at 0x34. Install it to slot 0xFF like any loader.
+ */
+fun setOrder(pkg: ByteArray, names: List<String>): ByteArray {
+    val magic = "WP2ORDER".toByteArray()
+    val fields = 16
+    val field = 24
+    val encoded = names.map { it.toByteArray() }
+    if (encoded.size > fields || encoded.any { it.size !in 1..23 }) throw OrderError("at most 16 names of 1..23 bytes")
+    val hits = (HEADER_SIZE..pkg.size - magic.size).filter { i -> (magic.indices).all { pkg[i + it] == magic[it] } }
+    if (hits.size != 1 || hits[0] + magic.size + fields * field > pkg.size) throw OrderError("no WP2ORDER table in the loader")
+    val p = pkg.copyOf()
+    val t = hits[0] + magic.size
+    ByteArray(fields * field).also { table -> encoded.forEachIndexed { i, n -> n.copyInto(table, i * field) } }.copyInto(p, t)
+    fun put(v: Long, at: Int) { for (k in 0..3) p[at + k] = (v shr (8 * k)).toByte() }
+    put(crc32(p.copyOfRange(HEADER_SIZE, p.size)), 0x30)
+    put(crc32(p.copyOfRange(0, 0x34)), 0x34)
+    return p
+}

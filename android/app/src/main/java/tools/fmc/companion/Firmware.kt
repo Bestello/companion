@@ -84,7 +84,8 @@ object FirmwareModel {
 
     /** The store's loader differs from the one on the watch (or the watch has none). Its header version is always 1. */
     fun loaderUpdate(state: LoaderState?): Boolean {
-        val want = check?.loaderHeader ?: return false
+        // the store's loader with the phone's app order in it: that is what Update installs
+        val want = check?.loaderPackage?.let { parseHeader(AppOrder.patched(it)) } ?: return false
         return state != null && state.loader?.crc != want.crc
     }
 
@@ -164,12 +165,12 @@ object FirmwareModel {
 
     /** Installs the store's App Loader over K, then reads the watch again. */
     suspend fun updateLoader(context: Context, model: AppModel) {
-        val pkg = check?.loaderPackage ?: return
+        val pkg = check?.loaderPackage?.let(AppOrder::patched) ?: return
         progress = 0.0
         // the services' listener holds the watch's K channel: off while installing
         try {
             kInstall(context, model, pkg) { p -> progress = p }
-            DevLog.log(context, "App Loader installed (crc %08x)".format(check?.loaderHeader?.crc ?: 0))
+            DevLog.log(context, "App Loader installed (crc %08x)".format(parseHeader(pkg)?.crc ?: 0))
             Analytics.track("loader_installed")
             error = null
         } catch (e: CancellationException) {

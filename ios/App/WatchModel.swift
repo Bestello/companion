@@ -36,6 +36,8 @@ import WireKit
             Analytics.track("watch_connected", ["firmware": state == nil ? "stock" : "patched"])
             lastLoader = state
             RPCListener.shared.update(state)
+            // an order the watch refused with Busy goes now
+            if AppOrder.shared.unsent { Task { await AppOrder.shared.send(self) } }
         } catch {
             phase = .failed(error.localizedDescription)
             lastLoader = nil

@@ -95,3 +95,23 @@ let header = hex(pkg.info_reply_hex).dropFirst()
     }
     await #expect(throws: InstallError.noFreeSlot(slots: 16)) { try await install(f, package: hex(pkg.hex)) { _ in } }
 }
+
+/// order-vectors.json: tools/order-vectors.py, from the SDK's own package.set_order.
+private struct OrderVectors: Decodable {
+    struct Ok: Decodable { let names: [String]; let hex: String }
+    struct Bad: Decodable { let loader: String; let names: [String]; let note: String }
+    let loader: String; let ok: [Ok]; let bad: [Bad]
+}
+
+@Test func orderMatchesSDK() throws {
+    let url = try #require(Bundle.module.url(forResource: "order-vectors", withExtension: "json"))
+    let o = try JSONDecoder().decode(OrderVectors.self, from: Data(contentsOf: url))
+    for c in o.ok {
+        let got = try setOrder(hex(o.loader), names: c.names)
+        #expect(got == hex(c.hex), "\(c.names)")
+        #expect(parseHeader(got)?.crc == parseHeader(hex(c.hex))?.crc)
+    }
+    for c in o.bad {
+        #expect(throws: (any Error).self, "\(c.note)") { try setOrder(hex(c.loader), names: c.names) }
+    }
+}

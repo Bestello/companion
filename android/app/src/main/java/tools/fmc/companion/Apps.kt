@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Email
+import tools.fmc.companion.wire.setOrder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocationOn
@@ -238,25 +239,67 @@ fun NavRow(title: String, detail: String? = null, count: Int = 0, onClick: () ->
  *  one read, "order|<watch>" its names); the Installed list shows it. */
 object AppOrder {
     private fun prefs(context: Context) = context.getSharedPreferences("app", 0)
-    fun watch(context: Context, id: String?) = prefs(context).edit().putString("watch", id).apply()
+    fun watch(context: Context, id: String?) {
+        prefs(context).edit().putString("watch", id).apply()
+        names = of(context)
+    }
 
     fun of(context: Context): List<String> = prefs(context).let { p ->
         p.getString("order|${p.getString("watch", "")}", null)?.split("\n")?.filter { it.isNotEmpty() } ?: emptyList()
     }
 
+    /** The saved order of the watch read last (empty before a read: the shipped loader's slot order). */
+    @Volatile var names: List<String> = emptyList()
+        private set
+    /** Changed on the phone and not on the watch yet: sent on Done, again after a Busy on the next read. */
+    @Volatile var unsent = false
+        private set
+    var sending by mutableStateOf(false)
+        private set
+    /** Why the last send didn't reach the watch. */
+    var status by mutableStateOf<String?>(null)
+        private set
+
+    /** The loader package with this order in it (cmf-watch-sdk docs/app-order.md); as it is when it has no table.
+     *  Every loader the phone installs goes through here, or an update would put the menu back in slot order. */
+    fun patched(loader: ByteArray): ByteArray = runCatching { setOrder(loader, names.take(16)) }.getOrDefault(loader)
+
     /** The saved order first, then the apps it doesn't name, as they came (by slot). */
     fun sorted(apps: List<WatchApp>, names: List<String>) =
         apps.sortedBy { a -> names.indexOf(a.name).let { if (it < 0) Int.MAX_VALUE else it } }
 
-    suspend fun set(context: Context, names: List<String>) {
+    fun set(context: Context, names: List<String>) {
         prefs(context).let { p -> p.edit().putString("order|${p.getString("watch", "")}", names.joinToString("\n")).apply() }
-        send(context, names)
+        this.names = names
+        unsent = true
     }
 
-    /** TODO(app-order): send the order to the watch over K (kRun, like remove) once cmf-watch-sdk docs/app-order.md
-     *  (branch app-order) says the command and bytes. Until then it stays on the phone. */
-    private fun send(context: Context, names: List<String>) =
-        DevLog.log(context, "app order saved on the phone (${names.size} apps); the watch doesn't take it yet")
+    /** The order goes inside the loader: the store's loader with the table patched, installed to slot 0xFF. */
+    suspend fun send(context: Context, model: AppModel) {
+        if (!unsent || sending || model.loader?.loader == null) return
+        sending = true
+        try {
+            if (FirmwareModel.check?.loaderPackage == null) FirmwareModel.refresh(model.account.token)
+            val loader = FirmwareModel.check?.loaderPackage
+                ?: return run { status = "Couldn't load the App Loader from fmc.tools to send the order. Pull to refresh to try again." }
+            kInstall(context, model, setOrder(loader, names.take(16))) {}
+            DevLog.log(context, "app order sent: ${names.joinToString()}")
+            unsent = false
+            status = null
+            model.check()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: tools.fmc.companion.wire.InstallError.Busy) {
+            // the menu holds the loader while it is open; tried again on the next read of the watch
+            status = "The Apps menu or an app is open on the watch. The order goes when you're back on the watch face and refresh."
+        } catch (_: tools.fmc.companion.wire.OrderError) {
+            status = "The App Loader on fmc.tools is older than the app order. The order stays on this phone for now."
+        } catch (e: Exception) {
+            status = "Couldn't send the order: ${e.message}"
+        } finally {
+            sending = false
+        }
+    }
 }
 
 @Composable
@@ -283,7 +326,10 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit) {
     val on = AppOrder.sorted(apps.filter { it.slot != null }, order)
     Column {
         Bar("Apps") {
-            if (!showAll && on.isNotEmpty()) TextButton({ editing = !editing }) { Text(if (editing) "Done" else "Edit") }
+            if (!showAll && on.isNotEmpty()) TextButton({
+                if (editing) scope.launch { AppOrder.send(context, model) }
+                editing = !editing
+            }) { Text(if (editing) "Done" else "Edit") }
         }
         LazyColumn {
             item {
@@ -310,13 +356,13 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit) {
             else {
                 // one list while editing: the order is of every app on the watch
                 if (editing) item("order") {
-                    Section("On the watch", "Set the order of the apps on the watch.") {
+                    Section("On the watch", "Set the order of the Apps menu on the watch. It goes to the watch inside the App Loader (about 54 KB) when you tap Done.") {
                         on.forEachIndexed { i, app ->
                             if (i > 0) HorizontalDivider()
                             fun move(to: Int) {
                                 val names = on.map { it.name }.toMutableList().apply { add(to, removeAt(i)) }
                                 order = names
-                                scope.launch { AppOrder.set(context, names) }
+                                AppOrder.set(context, names)
                             }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                                 AppIcon(app.name)
@@ -331,7 +377,8 @@ fun AppsScreen(model: AppModel, open: (String) -> Unit) {
                         }
                     }
                 } else if (updates.isNotEmpty()) group("Updates", updates, "Updates install over Bluetooth. Keep the app closed on the watch meanwhile.")
-                if (!editing && current.isNotEmpty()) group("On the watch", current)
+                if (!editing && current.isNotEmpty()) group("On the watch", current,
+                    if (AppOrder.sending) "Sending the order to the watch…" else AppOrder.status)
             }
             if (loading) item {
                 Section {

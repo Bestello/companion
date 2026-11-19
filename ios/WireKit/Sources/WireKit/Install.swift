@@ -105,3 +105,31 @@ public func install(_ s: Requester, package: Data, progress: @Sendable (Double) 
 public func remove(_ s: Requester, slot: Int) async throws {
     _ = try check(try await s.call(Cmd.delete, Data([UInt8(slot)])))
 }
+
+// MARK: Apps menu order (cmf-watch-sdk docs/app-order.md)
+
+public enum OrderError: Error, Equatable {
+    /// No single WP2ORDER table in the image, or one cut short: a loader older than the app order.
+    case noTable
+    /// Over 16 names, or a name not 1…23 UTF-8 bytes.
+    case badNames
+}
+
+/// The loader package with the Apps menu order `names` (package names, first row first) in its WP2ORDER table,
+/// re-signed: the image CRC at 0x30, then the header CRC at 0x34. Install it to slot 0xFF like any loader.
+public func setOrder(_ package: Data, names: [String]) throws -> Data {
+    var p = [UInt8](package)
+    let magic = [UInt8]("WP2ORDER".utf8), fields = 16, field = 24
+    let encoded = names.map { [UInt8]($0.utf8) }
+    guard encoded.count <= fields, encoded.allSatisfy({ (1...23).contains($0.count) }) else { throw OrderError.badNames }
+    guard p.count >= headerSize + magic.count else { throw OrderError.noTable }
+    let hits = (headerSize...p.count - magic.count).filter { i in p[i] == magic[0] && Array(p[i..<i + magic.count]) == magic }
+    guard hits.count == 1, hits[0] + magic.count + fields * field <= p.count else { throw OrderError.noTable }
+    let t = hits[0] + magic.count
+    let table = encoded.flatMap { $0 + [UInt8](repeating: 0, count: field - $0.count) }
+    p.replaceSubrange(t..<t + fields * field, with: table + [UInt8](repeating: 0, count: fields * field - table.count))
+    func put(_ v: UInt32, at o: Int) { for k in 0..<4 { p[o + k] = UInt8(v >> (8 * k) & 0xFF) } }
+    put(crc32(Data(p[headerSize...])), at: 0x30)
+    put(crc32(Data(p[..<0x34])), at: 0x34)
+    return Data(p)
+}
